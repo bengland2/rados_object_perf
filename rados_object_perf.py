@@ -2,10 +2,6 @@
 #
 # rados_object_perf.py - program to test performance of librados python binding
 # using async I/O interface.
-#
-# GNU V2 license at
-#    https://github.com/bengland2/rados_object_perf/blob/master/LICENSE
-#
 # command line parameters:
 #  conffile - Ceph configuration file pointing to cluster
 #    this file must also specify ceph.client.admin.keyring if cephx authentication
@@ -28,6 +24,7 @@
 # that the first thread finishes
 #
 import rados, sys, time, socket, os
+from rados import Ioctx
 
 debug=0
 dbgstr = os.getenv('DEBUG') 
@@ -184,10 +181,10 @@ def await_q_drain():
   timeout = qdrain_timeout
   while (rqs_posted - rqs_done > aio_qdepth) or ((rqs_posted == objcount) and (rqs_done < objcount)):
     time.sleep(0.001)
-    timeout -= 1.0
-    if timeout < 0.0:
-      print 'ERROR: queue never drained in %f sec!'%(qdrain_timeout/1000)
-      sys.exit(1)
+    #timeout -= 1.0
+    #if timeout < 0.0:
+    #  print 'ERROR: queue never drained in %f sec!'%(qdrain_timeout/1000)
+    #  sys.exit(1)
 
 hostname = socket.gethostname().split('.')[0]
 
@@ -227,7 +224,7 @@ objcount = int(sys.argv[6])
 optype = sys.argv[7]  # we want this last because we vary it the most
 thread_id = ''
 think_time = None
-think_time_sec = None
+think_time_sec = 0.0
 if len(sys.argv) > 8:
   thread_id = sys.argv[8]  # this is only used if we run this from some other script
   threads_total = int(sys.argv[9])
@@ -274,12 +271,12 @@ with rados.Rados(conffile=ceph_conf_file) as cluster:
       bigbuf = build_data_buf(objsize)
       for j in range(0,objcount):
         objnm = next_objnm(thread_id, j)
-	if debug & 1: print('creating %s'%objnm)
+        if debug & 1: print('creating %s'%objnm)
         if think_time: time.sleep(think_time_sec)
         call_start_time = time.time()
         ioctx.aio_write_full(objnm, bigbuf, oncomplete=on_wr_rq_done)
         next_elapsed_time = append_rsptime( response_times, call_start_time )
-        think_time_sec = (4.0*think_time_sec + next_elapsed_time) / 5.0
+        if think_time: think_time_sec = (4.0*think_time_sec + next_elapsed_time) / 5.0
         await_q_drain()
         if not (measurement_over or duration_based_exit(start_time, duration)):
           objs_done += 1
@@ -295,7 +292,7 @@ with rados.Rados(conffile=ceph_conf_file) as cluster:
         call_start_time = time.time()
         ioctx.aio_read(objnm, objsize, 0, oncomplete=on_rd_rq_done)
         next_elapsed_time = append_rsptime( response_times, call_start_time )
-        think_time_sec = (4.0*think_time_sec + next_elapsed_time) / 5.0
+        if think_time: think_time_sec = (4.0*think_time_sec + next_elapsed_time) / 5.0
         await_q_drain()
         if not (measurement_over or duration_based_exit(start_time, duration)):
           objs_done += 1
