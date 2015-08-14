@@ -6,21 +6,22 @@
 # GNU V2 license at
 #   https://github.com/bengland2/rados_object_perf/blob/master/LICENSE
 #
+
 conffile=/etc/ceph/ceph.conf
-poolnm=ben
 client_list=/root/osds.list
 osd_list=/root/osds.list
 
 # should not have to edit below this line normally
 
-OK=0
-NOTOK=1
 clients=(`cat $client_list`)
 servers=(`cat $osd_list`)
 perf_obj=rados_object_perf
+poolnm=radosperftest
 
-# command line parameters
+# parse command line inputs
 
+OK=0
+NOTOK=1
 wltype=$1
 objsize=$2
 threads=$3
@@ -48,6 +49,15 @@ echo "threads: $threads" ; \
 echo "test duration maximum: $duration" ; \
 echo "max objects per thread: $objcount" ) \
   | tee $logdir/summary.log
+
+# check that pool exists
+
+rados df -p $poolnm
+if [ $? != $OK ] ; then
+  echo "ERROR: could not check pool $poolnm status"
+  echo "create the pool first, then run the test"
+  exit $NOTOK
+fi
 
 # kill off any straggler processes on remote hosts
 
