@@ -18,10 +18,6 @@ Edit the top of the script above the line that says
 
 is your traditional ceph configuration file that mainly points it to where the monitors are.  The default is /etc/ceph/ceph.conf but feel free to change this.
 
-  poolnm=targetpool
-
-is the Ceph storage pool that you want to use, in this example "targetpool"
-
   client_list=/root/osds.list
 
 is a list of hostnames or IP addresses in a text file, one per line.  The workload threads will be launched on these hosts round-robin.
@@ -29,6 +25,8 @@ is a list of hostnames or IP addresses in a text file, one per line.  The worklo
   osd_list=/root/osds.list
 
 This is a list of OSD hosts, it is only here so that the test can drop cache on the OSD servers before running tests.
+
+By default, the script uses the pool named "radosperftest", which the user must create.  This name was chosen so that you won't accidentally overwrite a storage pool in a production system using this test, since it's unlikely to use this name.  You can change the "poolnm" variable in the script if you like.
 
 ## To run
 
