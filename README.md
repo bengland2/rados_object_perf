@@ -3,7 +3,7 @@ distributed RADOS workload generator for scalable Ceph performance testing
 
 ## Why another test
 
-Unlike "rados bench", this test supports fully distributed operation, and lets you apply workload to a single storage pool.  This is much closer to the way that typical RADOS applications use storage pools, with one pool for VMs, a different pool for RGW, and a different pool for CephFS.  If you try to run rados bench on multiple hosts against the same pool, you will get errors, because it wasn't designed for this.
+This test supports fully distributed operation, and lets you apply workload to a single storage pool.  This is much closer to the way that typical RADOS applications use storage pools, with one pool for VMs, a different pool for RGW, and a different pool for CephFS.  You can do the same thing with rados bench by using the --run_name `hostname -s` option.
 
 ## Requirements for operation
 
