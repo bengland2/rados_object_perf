@@ -66,7 +66,7 @@ def usage(msg):
 
 def on_rd_rq_done(completion,data_read):
   data_len = len(data_read)
-  #print 'complete read %d bytes'%data_len
+  #print 'complete read %d bytes' % data_len
   assert(data_len == objsize)
   global rqs_done
   rqs_done += 1
@@ -81,7 +81,7 @@ def on_wr_rq_done(completion):
 
 def backoff_lock():
   delay=(1.0 + int(thread_id)/100.0)
-  if debug: print('starting gun lock retry in %f sec'%delay)
+  if debug: print('starting gun lock retry in %f sec' % delay)
   time.sleep(delay)
 
 # wait for all threads to arrive at starting line
@@ -96,12 +96,12 @@ def await_starting_gun(ioctx):
 
       # we now have the lock
       thrds_ready = int(ioctx.get_xattr(perf_obj, 'threads_ready'))
-      if debug: print('threads ready: %d'%thrds_ready)
+      if debug: print('threads ready: %d' % thrds_ready)
       ioctx.set_xattr(perf_obj, 'threads_ready', str(thrds_ready+1))
       ioctx.remove_object(perf_obj+'/locked-by')
       not_yet_counted_myself = False
     except rados.Error as e:
-      if debug: print('thread %d retrying starting gun lock'%thread_id);
+      if debug: print('thread %d retrying starting gun lock' % thread_id);
       backoff_lock()
       continue  # go back and try for the lock again
 
@@ -111,13 +111,13 @@ def await_starting_gun(ioctx):
   while poll_count < poll_timeout:
     poll_count += 1
     threads_ready=int(ioctx.get_xattr(perf_obj, 'threads_ready'))
-    if debug: print('threads_ready now %d'%threads_ready)
+    if debug: print('threads_ready now %d' % threads_ready)
     if threads_ready >= threads_total:
       break
     time.sleep(max(threads_total/100, 2))
   if poll_count >= poll_timeout:
-     raise Exception('threads did not become ready within %d poll cycles'%poll_timeout)
-  if debug: print('thread %s saw starting gun fired'%thread_id)
+     raise Exception('threads did not become ready within %d poll cycles' % poll_timeout)
+  if debug: print('thread %s saw starting gun fired' % thread_id)
   time.sleep(2) # give threads time to find out that starting gun has fired
 
 # when thread is done, signal other threads to stop measuring
@@ -134,7 +134,7 @@ def post_done(ioctx):
         ioctx.remove_object(perf_obj+'/locked-by')
         not_yet_posted_completion = False
       except rados.Error as e:
-        if debug: print('thread %d retrying lock'%thread_id)
+        if debug: print('thread %d retrying lock' % thread_id)
         backoff_lock()
         continue
 
@@ -149,17 +149,17 @@ def time_estimator(obj_cnt_in):
 def other_threads_done(ioctx):
     thrds_done_str = ioctx.get_xattr(perf_obj, 'threads_done')
     thrds_done = int(thrds_done_str)
-    if debug: print ('threads done = %d'%thrds_done)
+    if debug: print ('threads done = %d' % thrds_done)
     return (thrds_done > 0)
 
 measurement_over = False
 def check_measurement_over(objs_done, ioctx):
   global last_checked, measurement_over
-  if debug & 8: print('check_meas_over: thread_id %s'%thread_id)
+  if debug & 8: print('check_meas_over: thread_id %s' % thread_id)
   if len(thread_id) == 0: return False
   if measurement_over: return True
   est_cost = time_estimator(objs_done)
-  if debug: print('est cost = %d time units'%est_cost)
+  if debug: print('est cost = %d time units' % est_cost)
   if (est_cost - last_checked) > check_every:
     last_checked = est_cost
     measurement_over = other_threads_done(ioctx)
@@ -176,27 +176,27 @@ rqs_posted = 0
 def await_q_drain():
   global rqs_posted, max_qdepth_seen
   max_qdepth_seen = max(rqs_posted - rqs_done, max_qdepth_seen)
-  if debug & 0x2: print('max_qdepth_seen = %d'%max_qdepth_seen)
+  if debug & 0x2: print('max_qdepth_seen = %d' % max_qdepth_seen)
   rqs_posted += 1
   timeout = qdrain_timeout
   while (rqs_posted - rqs_done > aio_qdepth) or ((rqs_posted == objcount) and (rqs_done < objcount)):
     time.sleep(0.001)
     #timeout -= 1.0
     #if timeout < 0.0:
-    #  print 'ERROR: queue never drained in %f sec!'%(qdrain_timeout/1000)
+    #  print 'ERROR: queue never drained in %f sec!' % (qdrain_timeout/1000)
     #  sys.exit(1)
 
 hostname = socket.gethostname().split('.')[0]
 
 def next_objnm( thread_id, index ):
-  return 'o%07d-%s'%(index, thread_id)
+  return 'o%07d-%s' % (index, thread_id)
 
 def duration_based_exit(start_time_in, duration_in):
   if duration_in == 0: return False
   now = time.time()
   elapsed = now - start_time_in
   if debug & 4:
-   print('duration_based_exit: elapsed=%f duration_in=%d'%(elapsed, duration_in))
+   print('duration_based_exit: elapsed=%f duration_in=%d' % (elapsed, duration_in))
   return (elapsed >= duration_in)
 
 # append response time to a list
@@ -231,16 +231,16 @@ if len(sys.argv) > 8:
   if len(sys.argv) > 10:
     think_time = int(sys.argv[10])
     think_time_sec = think_time / 1000.0  # convert from millisec to sec
-print 'conf file %s , pool %s , qdepth %d , duration %d , obj.size %d bytes, obj.count %d'%\
+print 'conf file %s , pool %s , qdepth %d , duration %d , obj.size %d bytes, obj.count %d' % \
       (ceph_conf_file, mypool, aio_qdepth, duration, objsize, objcount)
 if len(thread_id) > 0:
-  print('thread ID %s, total threads %d, msec delay between calls %s'%\
+  print('thread ID %s, total threads %d, msec delay between calls %s' % \
     (thread_id, threads_total, str(think_time)))
 
 max_qdepth_seen = 0
 # check every 1% of time points
 check_every = time_estimator(objcount) / 100
-if debug: print('check_every %d time units'%check_every)
+if debug: print('check_every %d time units' % check_every)
 
 response_times = []
 
@@ -271,7 +271,7 @@ with rados.Rados(conffile=ceph_conf_file) as cluster:
       bigbuf = build_data_buf(objsize)
       for j in range(0,objcount):
         objnm = next_objnm(thread_id, j)
-        if debug & 1: print('creating %s'%objnm)
+        if debug & 1: print('creating %s' % objnm)
         if think_time: time.sleep(think_time_sec)
         call_start_time = time.time()
         ioctx.aio_write_full(objnm, bigbuf, oncomplete=on_wr_rq_done)
@@ -324,35 +324,37 @@ with rados.Rados(conffile=ceph_conf_file) as cluster:
         for a in ioctx.get_xattrs(o.key):
            if debug: print(a)
            v = ioctx.get_xattr(o.key, a)
-           print '  %s = %s'%(a, str(v))
+           print '  %s =  %s' % (a, str(v))
         append_rsptime( response_times, call_start_time )
         if measurement_over or duration_based_exit(start_time, duration):
           elapsed_time = time.time() - start_time
         if objs_done > objcount:
           break
         check_measurement_over(objs_done, ioctx)
-      print 'objects processed = %d'%objs_done
+      print 'objects processed = %d' % objs_done
     else:
        usage('invalid operation type, must be CREATE, READ or CLEANUP')
 
     # measure throughput
 
     if elapsed_time < 0.0: elapsed_time = time.time() - start_time
-    print 'elapsed time = %f , objects requested = %d, objects done in measurement interval = %d'%\
-      (elapsed_time, objcount, objs_done)
+    print('elapsed time = %f , ' + 
+          'objects requested = %d, ' + 
+          'objects done in measurement interval = %d' % \
+      (elapsed_time, objcount, objs_done))
     if elapsed_time < 0.001:
-      usage('elapsed time %f is too short, no stats for you!'%elapsed_time)
+      usage('elapsed time %f is too short, no stats for you!' % elapsed_time)
     thru = objs_done / elapsed_time
-    print 'throughput = %f obj/sec'%thru
+    print 'throughput = %f obj/sec' % thru
     if optype == "create" or optype == "read":
       transfer_rate = thru * objsize / 1024.0 / 1024.0
-      print 'transfer rate = %f MB/s'%transfer_rate
-      print 'think time converged to %f sec'%think_time_sec
+      print 'transfer rate = %f MB/s' % transfer_rate
+      print 'think time converged to %f sec' % think_time_sec
     rsptimefile=os.getenv('RSPTIME_CSV')
     if rsptimefile:
       with open(rsptimefile, "w") as rspf:
         for (call_start, call_duration) in response_times:
-          rspf.write('%f, %f\n'%(call_start, call_duration))
+          rspf.write('%f, %f\n' % (call_start, call_duration))
 
     # let other threads know that you are done
 
