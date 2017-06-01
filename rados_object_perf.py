@@ -15,6 +15,8 @@
 #    read - reads specified number of bytes from existing objects
 #    cleanup - deletes specified objects - if they do not exist, no error
 #    list - read metadata for objects  
+#  user - which keyring to use for authx 
+#    (e.g. 'openstack' -> /etc/ceph/ceph.client.openstack.keyring)
 #  thread-id - optional, you only need this if you are running multiple threads
 #  thread-total - optional, total number of threads in test
 #    this allows the process to wait until all threads are ready to run 
@@ -51,6 +53,10 @@ objs_done = 0
 # declare  command line parameters up front so they have scope 
 
 ceph_conf_file = '/etc/ceph/ceph.conf'
+keyring = '/etc/ceph/ceph.client.%s.keyring'
+
+username = 'admin'
+keyring_path = keyring % username
 mypool = 'rados_object_perf'
 aio_qdepth = 1
 duration = 0
@@ -212,6 +218,7 @@ def usage(msg):
   print('usage: rados_object_perf.py ')
   print('--conf ceph-conf-file (default ceph.conf)')
   print('--pool pool-name')
+  print('--user username')
   print('--qdepth queue-depth (default 1)')
   print('--duration secs (default 0 means all objects)')
   print('--object-size bytes (default 4MiB)')
@@ -236,6 +243,9 @@ while arg_index < len(argv):
     ceph_conf_file = pval;
   elif pname == 'pool':
     mypool = pval
+  elif pname == 'user':
+    username = pval
+    keyring_path = keyring % username
   elif pname == 'qdepth':
     aio_qdepth = int(pval)
   elif pname == 'object-size':
@@ -257,6 +267,8 @@ while arg_index < len(argv):
 
 print('ceph cluster conf file = %s' % ceph_conf_file)
 print('ceph storage pool = %s' % mypool)
+print('username = %s' % username)
+print('keyring at %s' % keyring_path)
 print('I/O request queue depth = %d' % aio_qdepth)
 print('RADOS object size = %d' % objsize)
 print('RADOS object count = %d' % objcount)
@@ -277,7 +289,7 @@ response_times = []
 #   keyring = /root/ben/ceph.client.admin.keyring
 # alternatively don't use cephx
 
-with rados.Rados(conffile=ceph_conf_file) as cluster:
+with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cluster:
   print cluster.get_fsid()
   pools = cluster.list_pools()
   #print pools
