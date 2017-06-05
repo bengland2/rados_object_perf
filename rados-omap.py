@@ -122,11 +122,12 @@ if direction == 'write' or direction == 'writeread':
             read_keycount += 1
             if debug: print(k)
           read_end_time = time.time()
-          print('keycount = %d' % read_keycount)
+          print('read keycount = %d' % read_keycount)
           read_delta_time = read_end_time - read_start_time
           print('elapsed read time: %f' % read_delta_time)
           read_throughput = read_keycount / read_delta_time
           print('read throughput = %f' % read_throughput)
+          sys.stdout.flush()
 else: 
   print(ioctx.read(obj_name))
   start_time = time.time()
@@ -145,4 +146,5 @@ ioctx.close()
 
 delta_time = end_time - start_time
 print('elapsed time: %f' % delta_time)
-
+throughput = total_keys  / delta_time
+print('throughput = %f' % throughput)
