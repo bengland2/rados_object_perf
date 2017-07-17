@@ -315,7 +315,7 @@ with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cl
         call_start_time = time.time()
         ioctx.aio_write_full(objnm, bigbuf, oncomplete=on_wr_rq_done)
         next_elapsed_time = append_rsptime( response_times, call_start_time )
-        if think_time: think_time_sec = (4.0*think_time_sec + next_elapsed_time) / 5.0
+        #if think_time: think_time_sec = (4.0*think_time_sec + next_elapsed_time) / 5.0
         await_q_drain()
         if not (measurement_over or duration_based_exit(start_time, duration)):
           objs_done += 1
@@ -331,7 +331,7 @@ with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cl
         call_start_time = time.time()
         ioctx.aio_read(objnm, objsize, 0, oncomplete=on_rd_rq_done)
         next_elapsed_time = append_rsptime( response_times, call_start_time )
-        if think_time: think_time_sec = (4.0*think_time_sec + next_elapsed_time) / 5.0
+        #if think_time: think_time_sec = (4.0*think_time_sec + next_elapsed_time) / 5.0
         await_q_drain()
         if not (measurement_over or duration_based_exit(start_time, duration)):
           objs_done += 1
@@ -388,7 +388,7 @@ with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cl
     if optype == "create" or optype == "read":
       transfer_rate = thru * objsize / 1024.0 / 1024.0
       print 'transfer rate = %f MB/s' % transfer_rate
-      print 'think time converged to %f sec' % think_time_sec
+      #print 'think time converged to %f sec' % think_time_sec
     rsptimefile=os.getenv('RSPTIME_CSV')
     if rsptimefile:
       with open(rsptimefile, "w") as rspf:
