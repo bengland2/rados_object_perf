@@ -8,8 +8,9 @@
 #
 
 conffile=/etc/ceph/ceph.conf
-client_list=/root/osds.list
-osd_list=/root/osds.list
+client_list=clients.list
+osd_list=osds.list
+inv=~/to-installer/internal-ansible-hosts
 
 # should not have to edit below this line normally
 
@@ -22,15 +23,40 @@ poolnm=radosperftest
 
 OK=0
 NOTOK=1
-wltype=$1
-objsize=$2
-threads=$3
-duration=$4
-objcount=$5
-if [ -z "$5" ] ; then
-  echo "usage: rados-obj-perf.sh workload-type object-size-bytes threads duration-sec objects-per-thread-max"
+
+usage() {
+  echo "ERROR: $1"
+  echo "usage: ./rados-obj-perf.sh --obj-size bytes --obj-count objects --threads count --request-type create|read|cleanup"
   exit $NOTOK
-fi
+}
+
+while [ -n "$1" ] ; do
+  if [ -z "$2" ] ; then
+     usage "$2: missing parameter value"
+  fi
+  case $1 in
+    --request-type)
+      wltype=$2
+      ;;
+    --obj-size)
+      objsize=$2     
+      ;;
+    --threads)
+      threads=$2
+      ;;
+    --obj-count)
+      objcount=$2
+      ;;
+    --think-time)
+      thinktime=$2
+      ;;
+    *)
+      usage "unrecognized parameter name: $1"
+      ;;
+  esac
+  shift
+  shift
+done
 
 # set up log directory and record test parameters
 
@@ -47,6 +73,7 @@ echo "workload type: $wltype" ; \
 echo "object size (bytes): $objsize" ; \
 echo "threads: $threads" ; \
 echo "test duration maximum: $duration" ; \
+echo "think time: $thinktime" ; \
 echo "max objects per thread: $objcount" ) \
   | tee $logdir/summary.log
 
@@ -58,6 +85,8 @@ if [ $? != $OK ] ; then
   echo "create the pool first, then run the test"
   exit $NOTOK
 fi
+rados rm -p $poolnm threads_done
+rados rm -p $poolnm threads_ready
 
 # kill off any straggler processes on remote hosts
 
@@ -67,11 +96,11 @@ if [ $hostcount == 0 ] ; then
   exit $NOTOK
 fi
 radoscmd="rados -c $conffile -p $poolnm "
-par-for-all.sh $client_list 'killall -q rados_object_perf.py || echo -n'
+ansible -i $inv -m shell -a 'killall -q rados_object_perf.py || echo -n' all
 if [ $wltype = "read" ] ; then
-  par-for-all.sh $osd_list 'sync ; echo 3 > /proc/sys/vm/drop_caches'
+  ansible -i $inv -m shell -a 'sync ; echo 3 > /proc/sys/vm/drop_caches' osds
 fi
-par-for-all.sh $client_list 'killall -q rados_object_perf.py || echo -n'
+ansible -i $inv -m shell -a 'killall -q rados_object_perf.py || echo -n' all
 sleep 1
 echo "make sure rados_object_perf.py on clients is same as we have here"
 for c in ${clients[*]} ; do 
@@ -87,11 +116,11 @@ $radoscmd setxattr $perf_obj threads_ready 0
 $radoscmd setxattr $perf_obj threads_done 0
 
 # compute think time
-think_time=''
-if [ $wltype == "read" -o $wltype == "create" ] ; then 
+#thinktime='0.0'
+#if [ $wltype == "read" -o $wltype == "create" ] ; then 
   # FIXME: need to take into account different hardware configs
-  (( think_time = $threads - 1 ))
-fi
+#  (( thinktime = $threads - 1 ))
+#fi
 
 # start threads
 
@@ -109,10 +138,13 @@ for padded_n in `seq -f "%03g" 1 $threads` ; do
 
   # launch next thread
   rsptimepath="/tmp/rados-wl-thread-${padded_n}.csv"
-  next_launch="ssh $host 'RSPTIME_CSV=$rsptimepath ./rados_object_perf.py $conffile $poolnm $threads $duration $objsize $objcount $wltype $n $threads $think_time'"
+  next_launch="ssh $host ./rados_object_perf.py --conf $conffile --pool $poolnm --object-size $objsize --object-count $objcount --request-type $wltype --thread-id $n --thread-total $threads "
+  if [ -n "$thinktime" ] ; then
+    next_launch="$next_launch --think-time $thinktime"
+  fi
   cmd[$unpadded_n]="$next_launch"
   echo "$next_launch"
-  eval "$next_launch" > $logdir/rados-wl-thread-$padded_n.log &
+  (echo "$next_launch" ; eval "$next_launch" ) > $logdir/rados-wl-thread-$padded_n.log &
   pids="$pids $!"  # save next thread PID
   # throttle launches so ssh doesn't lock up
   if [ $hx = 0 ] ; then sleep 1 ; fi
