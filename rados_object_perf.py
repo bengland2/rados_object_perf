@@ -25,7 +25,8 @@
 # if you run a multi-threaded test, then measurement stops roughly at the time
 # that the first thread finishes
 #
-import rados, sys, time, socket, os
+
+import rados, sys, time, socket, os, json
 from rados import Ioctx
 
 debug=0
@@ -67,6 +68,9 @@ thread_id = ''
 threads_total = 1
 think_time = 0
 think_time_sec = 0.0
+output_json = False
+rsptime_path = None
+
 
 # make a string of the specified number of bytes to write to object
 
@@ -75,6 +79,7 @@ def build_data_buf(sz):
   while len(starting_buf) < sz:
     starting_buf += starting_buf
   return starting_buf[0:sz]
+
 
 # for reads, we check that data read was of expected length and increment rqs done
 # no race condition here because only this routine modifies rqs_done
@@ -86,11 +91,13 @@ def on_rd_rq_done(completion,data_read):
   assert(data_len == objsize)
   rqs_done += 1
 
+
 # for creates, increment rqs done, again this is only routine touching it
 
 def on_wr_rq_done(completion):
   global rqs_done
   rqs_done += 1
+
 
 # count number of threads ready or done
 
@@ -106,6 +113,7 @@ def count_threads_in_omap(omap_obj):
       ct += 1
     return ct
 
+
 # have threads wait different amounts of time for lock
 
 def backoff_lock():
@@ -113,12 +121,20 @@ def backoff_lock():
   if debug: print('starting gun lock retry in %f sec' % delay)
   time.sleep(delay)
 
+
 # wait for all threads to arrive at starting line
 
 def await_starting_gun(ioctx):
   if len(thread_id) == 0: return # skip this unless there are multiple processes running this test
+
+  # if multiple threads write to the object, this is harmless
+  # just ensuring that object exists before we update its omap
+
   ioctx.write_full(threads_ready_obj, '%8s\n' % thread_id) # ensure object exists before writing to omap
   ioctx.write_full(threads_done_obj, '%8s\n' % thread_id)  # ensure this object exists too
+
+  # tell other threads that this thread has arrived at the starting gate
+
   with rados.WriteOpCtx() as op:
     ioctx.set_omap(op, (thread_id,), (b'',))
     ioctx.operate_write_op(op, threads_ready_obj)
@@ -138,6 +154,7 @@ def await_starting_gun(ioctx):
   if debug: print('thread %s saw starting gun fired' % thread_id)
   time.sleep(2) # give threads time to find out that starting gun has fired
 
+
 # when thread is done, signal other threads to stop measuring
 
 def post_done(ioctx):
@@ -145,6 +162,7 @@ def post_done(ioctx):
   with rados.WriteOpCtx() as op:
     ioctx.set_omap(op, (thread_id,), (b'',))
     ioctx.operate_write_op(op, threads_done_obj)
+
 
 # check every so often to see if a thread has finished
 # but not too often or we'll slow down Ceph
@@ -154,10 +172,16 @@ def post_done(ioctx):
 def time_estimator(obj_cnt_in):
   return (obj_cnt_in * (objsize + 1000000))
 
+
+# see if any other threads have finished their assigned objects
+
 def other_threads_done(ioctx):
     thrds_done = count_threads_in_omap(threads_done_obj)
     if debug: print ('threads done = %d' % thrds_done)
     return (thrds_done > 0)
+
+
+# measuremeht is over for this thread when any other thread has finished
 
 def check_measurement_over(objs_done, ioctx):
   global last_checked, measurement_over
@@ -170,6 +194,7 @@ def check_measurement_over(objs_done, ioctx):
     last_checked = est_cost
     measurement_over = other_threads_done(ioctx)
   return measurement_over
+
 
 # wait for the queue size to shrink
 # we don't have a way to wait for this event
@@ -189,8 +214,14 @@ def await_q_drain():
     #  print 'ERROR: queue never drained in %f sec!' % (qdrain_timeout/1000)
     #  sys.exit(1)
 
+
+# generate next object name for this thread
+
 def next_objnm( thread_id, index ):
   return 'o%07d-%s' % (index, thread_id)
+
+
+# if user requested duration-based test, see if our time is up
 
 def duration_based_exit(start_time_in, duration_in):
   if duration_in == 0: return False
@@ -199,6 +230,7 @@ def duration_based_exit(start_time_in, duration_in):
   if debug & 4:
    print('duration_based_exit: elapsed=%f duration_in=%d' % (elapsed, duration_in))
   return (elapsed >= duration_in)
+
 
 # append response time to a list
 # inputs:
@@ -210,6 +242,7 @@ def append_rsptime( rsptime_list, call_start_time ):
   call_duration = now - call_start_time
   rsptime_list.append( (now, call_duration) )
   return call_duration
+
 
 # general-purpose input error handler
 
@@ -226,7 +259,10 @@ def usage(msg):
   print('--request-type [create|read|cleanup|list] (default cleanup)')
   print('--thread-id string (default thr1)')
   print('--thread-total (default 1)')
+  print('--output-format json (default is text)')
+  print('--response-time-file path')
   sys.exit(1)
+
 
 # parse inputs
 
@@ -261,21 +297,42 @@ while arg_index < len(argv):
   elif pname == 'think-time':
     think_time_msec = int(pval)
     think_time_sec = float(think_time_msec) / 1000.0
+  elif pname == 'response-time-file':
+    rsptime_path = pval
+  elif pname == 'output-format':
+    if pval != 'json': usage('invalid output format')
+    output_json = True
   else: usage('--%s: invalid parameter name' % pname)
 
 # display input parameter values (including defaults)
 
-print('ceph cluster conf file = %s' % ceph_conf_file)
-print('ceph storage pool = %s' % mypool)
-print('username = %s' % username)
-print('keyring at %s' % keyring_path)
-print('I/O request queue depth = %d' % aio_qdepth)
-print('RADOS object size = %d' % objsize)
-print('RADOS object count = %d' % objcount)
-print('operation type = %s' % optype)
-print('thread_id = %s' % thread_id)
-print('total threads in test = %d' % threads_total)
-print('think time (sec) = %f' % think_time_sec)
+if not output_json:
+  print('ceph cluster conf file = %s' % ceph_conf_file)
+  print('ceph storage pool = %s' % mypool)
+  print('username = %s' % username)
+  print('keyring at %s' % keyring_path)
+  print('I/O request queue depth = %d' % aio_qdepth)
+  print('RADOS object size = %d' % objsize)
+  print('RADOS object count = %d' % objcount)
+  print('operation type = %s' % optype)
+  print('thread_id = %s' % thread_id)
+  print('total threads in test = %d' % threads_total)
+  print('think time (sec) = %f' % think_time_sec)
+else:
+  json_obj = {}
+  params = {}
+  params['conf_file'] = ceph_conf_file
+  params['pool'] = mypool
+  params['user'] = username
+  params['keyring'] = keyring_path
+  params['qdepth'] = aio_qdepth
+  params['obj_size'] = objsize
+  params['obj_count'] = objcount
+  params['op_type'] = optype
+  params['thread_id'] = thread_id
+  params['total_threads'] = threads_total
+  params['think_time'] = think_time_sec
+  json_obj['params'] = params
 
 max_qdepth_seen = 0
 # check every 1% of time points
@@ -290,7 +347,7 @@ response_times = []
 # alternatively don't use cephx
 
 with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cluster:
-  print cluster.get_fsid()
+  #print cluster.get_fsid()
   pools = cluster.list_pools()
   #print pools
   if not pools.__contains__(mypool):
@@ -315,7 +372,6 @@ with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cl
         call_start_time = time.time()
         ioctx.aio_write_full(objnm, bigbuf, oncomplete=on_wr_rq_done)
         next_elapsed_time = append_rsptime( response_times, call_start_time )
-        #if think_time: think_time_sec = (4.0*think_time_sec + next_elapsed_time) / 5.0
         await_q_drain()
         if not (measurement_over or duration_based_exit(start_time, duration)):
           objs_done += 1
@@ -331,7 +387,6 @@ with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cl
         call_start_time = time.time()
         ioctx.aio_read(objnm, objsize, 0, oncomplete=on_rd_rq_done)
         next_elapsed_time = append_rsptime( response_times, call_start_time )
-        #if think_time: think_time_sec = (4.0*think_time_sec + next_elapsed_time) / 5.0
         await_q_drain()
         if not (measurement_over or duration_based_exit(start_time, duration)):
           objs_done += 1
@@ -344,10 +399,12 @@ with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cl
     elif optype == 'cleanup':
       for j in range(0,objcount):
         objnm = next_objnm(thread_id, j)
+        call_start_time = time.time()
         try:
           ioctx.remove_object(objnm)
         except rados.ObjectNotFound as e:
           pass
+        append_rsptime( response_times, call_start_time )
         # dont want to do this when cleaning up: 
         # if (duration_based_exit(start_time, duration)): break
         objs_done += 1
@@ -374,28 +431,47 @@ with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cl
     else:
        usage('invalid operation type, must be CREATE, READ or CLEANUP')
 
-    # measure throughput
-
-    if elapsed_time < 0.0: elapsed_time = time.time() - start_time
-    print(('elapsed time = %f , ' + 
-           'objects requested = %d, ' + 
-           'objects done in measurement interval = %d') % \
-      (elapsed_time, objcount, objs_done))
-    if elapsed_time < 0.001:
-      usage('elapsed time %f is too short, no stats for you!' % elapsed_time)
-    thru = objs_done / elapsed_time
-    print 'throughput = %f obj/sec' % thru
-    if optype == "create" or optype == "read":
-      transfer_rate = thru * objsize / 1024.0 / 1024.0
-      print 'transfer rate = %f MB/s' % transfer_rate
-      #print 'think time converged to %f sec' % think_time_sec
-    rsptimefile=os.getenv('RSPTIME_CSV')
-    if rsptimefile:
-      with open(rsptimefile, "w") as rspf:
-        for (call_start, call_duration) in response_times:
-          rspf.write('%f, %f\n' % (call_start, call_duration))
-
     # let other threads know that you are done
 
     post_done(ioctx)
+
+    # measure throughput
+
+    if elapsed_time < 0.0:
+      # for some workload types, end time is when first thread exits
+      # for cleanup it's not
+      elapsed_time = time.time() - start_time
+    thru = 0.0
+    transfer_rate = 0.0
+    if elapsed_time > 0.0:
+      thru = objs_done / elapsed_time
+      if optype == "create" or optype == "read":
+        transfer_rate = thru * objsize / 1024.0 / 1024.0
+
+    # output results in requested format
+
+    if not output_json:
+      print(('elapsed time = %f , ' + 
+             'objects requested = %d, ' + 
+             'objects done in measurement interval = %d') % \
+        (elapsed_time, objcount, objs_done))
+      if elapsed_time < 0.001:
+        usage('elapsed time %f is too short, no stats for you!' % elapsed_time)
+      print 'throughput = %f obj/sec' % thru
+      if optype == "create" or optype == "read":
+        print 'transfer rate = %f MiB/s' % transfer_rate
+    else:
+      results = {}
+      results['elapsed'] = elapsed_time
+      results['objs_done'] = objs_done
+      results['transfer_rate'] = transfer_rate
+      json_obj['results'] = results
+      print(json.dumps(json_obj, indent=4))
+
+    # save response time data if desired
+
+    if rsptime_path:
+      with open(rsptime_path, "w") as rspf:
+        for (call_start, call_duration) in response_times:
+          rspf.write('%f, %f\n' % (call_start, call_duration))
   
