@@ -151,16 +151,24 @@ n=0
 for padded_n in `seq -f "%03g" 1 $threads` ; do 
   (( n = $n + 1 ))
   host=${clients[${hx}]}
+
   # compute host index as thread number modulo hostcount
   ((hx = $hx + 1))
   if [ $hx -ge $hostcount ] ; then hx=0 ; fi
 
-  # launch next thread
+  # determine rados_object_perf.py command to launch
+
   rsptimepath="/tmp/rados-wl-thread-${padded_n}.csv"
-  next_launch="ssh $host ./rados_object_perf.py --conf $conffile --pool $poolnm --object-size $objsize --object-count $objcount --request-type $wltype --thread-id $n --thread-total $threads "
+  l="ssh $host ./rados_object_perf.py --output-format json --response-time-file $rsptimepath " 
+  l="$l --conf $conffile --pool $poolnm --object-size $objsize --object-count $objcount "
+  l="$l --request-type $wltype --thread-id $n --thread-total $threads "
   if [ -n "$thinktime" ] ; then
-    next_launch="$next_launch --think-time $thinktime"
+    l="$l --think-time $thinktime"
   fi
+
+  # launch next thread
+
+  next_launch="$l"
   cmd[$unpadded_n]="$next_launch"
   echo "$next_launch"
   (echo "$next_launch" ; eval "$next_launch" ) > $logdir/rados-wl-thread-$padded_n.log &
@@ -198,10 +206,7 @@ done
 # record aggregate result
 
 ( echo ; echo "SUMMARY" ; echo "------" ; \
-echo -n "object access rate (objs/sec): "  ; \
-grep 'throughput' $logdir/rados-wl-thread-*log | awk '{ sum += $(NF-1) }END{print sum}' ; \
-echo -n "data transfer rate (MB/sec): "  ; \
-grep 'transfer rate' $logdir/rados-wl-thread-*log | awk '{ sum += $(NF-1) }END{print sum}' ) \
+  ./analyze-roperf-logs.py --directory $logdir ) \
   | tee -a $logdir/summary.log
 $radoscmd rm $perf_obj
 
