@@ -18,6 +18,10 @@ clients=(`cat $client_list`)
 servers=(`cat $osd_list`)
 perf_obj=rados_object_perf
 poolnm=radosperftest
+wltype=cleanup
+threads=1
+objcount=256
+thinktime=0
 
 # parse command line inputs
 
@@ -26,10 +30,27 @@ NOTOK=1
 
 usage() {
   echo "ERROR: $1"
-  echo "usage: ./rados-obj-perf.sh --obj-size bytes --obj-count objects --threads count --request-type create|read|cleanup"
+  echo "usage: ./rados-obj-perf.sh --obj-size bytes --obj-count objects --threads count --request-type create|read|cleanup --think-time millisec "
   exit $NOTOK
 }
 
+cleanup() {
+  ansible -i $inv -m shell -a 'killall -q rados_object_perf.py || echo -n' all
+  if [ $wltype = "read" ] ; then
+    ansible -i $inv -m shell -a 'sync ; echo 3 > /proc/sys/vm/drop_caches' osds
+  fi
+  ansible -i $inv -m shell -a 'killall -q rados_object_perf.py || echo -n' all
+  sleep 1
+}
+
+myabort() {
+  cleanup
+  exit $NOTOK
+}
+
+trap myabort 1 2 3
+
+if [ -z "$1" ] ; then usage 'no parameters at all?' ; fi
 while [ -n "$1" ] ; do
   if [ -z "$2" ] ; then
      usage "$2: missing parameter value"
@@ -77,6 +98,14 @@ echo "think time: $thinktime" ; \
 echo "max objects per thread: $objcount" ) \
   | tee $logdir/summary.log
 
+# check client list
+
+hostcount=${#clients[*]}
+if [ $hostcount == 0 ] ; then
+  echo "no RADOS client list found"
+  exit $NOTOK
+fi
+
 # check that pool exists
 
 rados df -p $poolnm
@@ -90,18 +119,8 @@ rados rm -p $poolnm threads_ready
 
 # kill off any straggler processes on remote hosts
 
-hostcount=${#clients[*]}
-if [ $hostcount == 0 ] ; then
-  echo "no RADOS client list found"
-  exit $NOTOK
-fi
+cleanup
 radoscmd="rados -c $conffile -p $poolnm "
-ansible -i $inv -m shell -a 'killall -q rados_object_perf.py || echo -n' all
-if [ $wltype = "read" ] ; then
-  ansible -i $inv -m shell -a 'sync ; echo 3 > /proc/sys/vm/drop_caches' osds
-fi
-ansible -i $inv -m shell -a 'killall -q rados_object_perf.py || echo -n' all
-sleep 1
 echo "make sure rados_object_perf.py on clients is same as we have here"
 for c in ${clients[*]} ; do 
   rsync -ravu rados_object_perf.py $c:
@@ -186,3 +205,4 @@ grep 'transfer rate' $logdir/rados-wl-thread-*log | awk '{ sum += $(NF-1) }END{p
   | tee -a $logdir/summary.log
 $radoscmd rm $perf_obj
 
+cleanup
