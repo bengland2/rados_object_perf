@@ -70,7 +70,7 @@ think_time = 0
 think_time_sec = 0.0
 output_json = False
 rsptime_path = None
-
+transfer_unit = 'MB'
 
 # make a string of the specified number of bytes to write to object
 
@@ -265,6 +265,7 @@ def usage(msg):
   print('--thread-total (default 1)')
   print('--output-format json (default is text)')
   print('--response-time-file path')
+  print('--transfer-unit MB|MiB (default is MB)')
   sys.exit(1)
 
 
@@ -306,6 +307,11 @@ while arg_index < len(argv):
   elif pname == 'output-format':
     if pval != 'json': usage('invalid output format')
     output_json = True
+  elif pname == 'transfer-unit':
+    if pval == 'MB' or pval == 'MiB':
+      transfer_unit = pval
+    else:
+      usage('transfer unit must be either MB (millions of bytes) or MiB (power-of-2 megabytes)')
   else: usage('--%s: invalid parameter name' % pname)
 
 # display input parameter values (including defaults)
@@ -450,7 +456,10 @@ with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cl
     if elapsed_time > 0.0:
       thru = objs_done / elapsed_time
       if optype == "create" or optype == "read":
-        transfer_rate = thru * objsize / 1024.0 / 1024.0
+        if transfer_unit == 'MB':
+          transfer_rate = thru * objsize / 1000.0 / 1000.0
+        else:
+          transfer_rate = thru * objsize / 1024.0 / 1024.0
 
     # output results in requested format
 
