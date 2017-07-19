@@ -142,15 +142,19 @@ def await_starting_gun(ioctx):
   # wait until all threads are ready to run
 
   poll_count=0
+  # calculate delay based on how long it takes to start up threads
+  sleep_delay = max(threads_total/10.0, 2)
   while poll_count < poll_timeout:
     poll_count += 1
     threads_ready = count_threads_in_omap(threads_ready_obj)
     if debug: print('threads_ready now %d' % threads_ready)
     if threads_ready >= threads_total:
       break
-    time.sleep(max(threads_total/100, 2))
+    if debug: print('waiting %f sec until next thread count check' % sleep_delay)
+    time.sleep(sleep_delay)
+    if debug: print
   if poll_count >= poll_timeout:
-     raise Exception('threads did not become ready within %d poll cycles' % poll_timeout)
+     raise Exception('threads did not become ready within %d polls with interval %f' % (poll_timeout, sleep_delay))
   if debug: print('thread %s saw starting gun fired' % thread_id)
   time.sleep(2) # give threads time to find out that starting gun has fired
 
