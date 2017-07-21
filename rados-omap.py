@@ -8,6 +8,7 @@ import rados
 def usage(msg):
   print('ERROR: ' + msg)
   print('usage: rados-omap-perf.py ')
+  print('  --object-name which-object')
   print('  --value-size unsigned ')
   print('  --keys-per-call unsigned ')
   print('  --keys unsigned ')
@@ -27,12 +28,14 @@ def parse_int(valstr, inttype):
   return val
 
 keys_per_call = 1
+key_prefix = 'key'
 value_size = 0
 total_keys = 10
 direction = 'write'
 pool_name = 'rbd'
 obj_name = 'my-omap-object'
 debug = False
+think_time = 0.0
 
 k=1
 argc = len(sys.argv)
@@ -49,22 +52,30 @@ while k < argc:
     try:
       keys_per_call = parse_int(prmval, 'positive')
     except ValueError as e:
-      print('error parsing --%s: %s' % (prmname, e))
+      usage('error parsing --%s: %s' % (prmname, e))
   elif prmname == 'value-size':
     try:
       value_size = parse_int(prmval, 'positive')
     except ValueError as e:
-      print('error parsing --%s: %s' % (prmname, e))
-    usage('--value-size not yet implemented')
+      usage('error parsing --%s: %s' % (prmname, e))
+  elif prmname == 'object-name':
+    obj_name = prmval
   elif prmname == 'keys':
     try:
       total_keys = parse_int(prmval, 'positive')
     except ValueError as e:
-      print('error parsing --%s: %s' % (prmname, e))
+      usage('error parsing --%s: %s' % (prmname, e))
+  elif prmname == 'key-prefix':
+    key_prefix = prmval
   elif prmname == 'direction':
     if prmval != 'read' and prmval != 'write' and prmval != 'writeread':
       usage('--direction can be either set to "read" or "write" or "readwrite"')
     direction = prmval
+  elif prmname == 'think-time':
+    try:
+      think_time = float(prmval)
+    except ValueError as e:
+      usage('error parsing floating-point --%s: %s' % (prmname, e))
   elif prmname == 'pool-name':
     pool_name = prmval
   elif prmname == 'debug':
@@ -77,9 +88,12 @@ while k < argc:
 
 print('keys: %d' % total_keys)
 print('keys-per-call: %d' % keys_per_call)
+print('key-prefix: %s' % key_prefix)
 print('direction: %s' % direction)
-print('value-size: %d' % value_size)
+print('value-size: %d bytes' % value_size)
 print('pool-name: %s' % pool_name)
+print('object-name: %s' % obj_name)
+print('think-time: %f sec' % think_time)
 
 conn = rados.Rados(conffile='/etc/ceph/ceph.conf')
 conn.connect()
@@ -92,7 +106,7 @@ if direction == 'write' or direction == 'writeread':
     pass  # ensure object isn't there
 
   ioctx.write_full(obj_name, 'hi there')
-
+  time.sleep(5) # give multiple threads time to set up
   start_time = time.time()
   next_power_of_4 = 4
   base_key = 0
@@ -100,9 +114,15 @@ if direction == 'write' or direction == 'writeread':
   while base_key < total_keys:
     with rados.WriteOpCtx() as op:
       for k in range(keys_per_call):
-        omap_key_name = 'key-%09d' % (k + base_key)
+        omap_key_name = '%s-%09d' % (key_prefix, k + base_key)
+        if value_size > 0:
+          v = omap_key_name
+          while len(v) < value_size: v = v + '.' + v
+          value = v[:value_size]
         ioctx.set_omap(op, (omap_key_name,), (value,))
       ioctx.operate_write_op(op, obj_name)
+      if think_time > 0.0:
+        time.sleep(think_time)
       base_key += keys_per_call
 
       # we read the entire omap when it reaches 4^k in size
@@ -130,14 +150,19 @@ if direction == 'write' or direction == 'writeread':
           sys.stdout.flush()
 else: 
   print(ioctx.read(obj_name))
+  time.sleep(5) # give multiple threads time to set up
   start_time = time.time()
   with rados.ReadOpCtx() as op:
     omaps, ret = ioctx.get_omap_vals(op, "", "", -1)
     ioctx.operate_read_op(op, obj_name)
     keys = (k for k, __ in omaps)
+    values = (v for __, v in omaps)
     keycount = 0
     for k in keys:
        keycount += 1
+    for v in values:
+       valuecount += 1
+    assert(keycount == valuecount)
     if keycount < total_keys:
       usage('must first write an omap key list at least as long as %d keys' % total_keys)
 
