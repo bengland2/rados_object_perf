@@ -40,8 +40,6 @@ for f in contents:
   if f.endswith('.log') and f.startswith('rados'):
     print fn
     with open(fn, 'r') as jsonf:
-      cmd = jsonf.readline()
-      print cmd
       next_thread = json.load(jsonf)
       tid = next_thread['params']['thread_id']
       threads[tid] = next_thread
@@ -57,12 +55,12 @@ for t in threads.values():
   max_elapsed = max(max_elapsed, t['results']['elapsed'])
   total_objs_requested += t['params']['obj_count']
 
-print('total transfer rate: %f' % total_xfer_rate)
+print('elapsed time: %f' % max_elapsed)
 print('total objects done: %d' % total_objs_done)
 print('total objects requested: %d' % total_objs_requested)
-print('elapsed time: %f' % max_elapsed)
 print('objects/sec average: %f' % (total_objs_done / max_elapsed))
 pct_objs_done = 100.0 * total_objs_done / total_objs_requested
+print('total transfer rate: %f' % total_xfer_rate)
 print('%% objects done: %f' % pct_objs_done)
 if pct_objs_done < pct_done_threshold:
   print('WARNING: fewer than %d%% requested objects were processed in measurement interval' % pct_done_threshold)
