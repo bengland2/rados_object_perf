@@ -35,11 +35,8 @@ usage() {
 }
 
 cleanup() {
-  ansible -i $inv -m shell -a 'killall -q rados_object_perf.py || echo -n' all
-  if [ $wltype = "read" ] ; then
-    ansible -i $inv -m shell -a 'sync ; echo 3 > /proc/sys/vm/drop_caches' osds
-  fi
-  ansible -i $inv -m shell -a 'killall -q rados_object_perf.py || echo -n' all
+  echo "killing any leftover threads"
+  ansible -i $inv -m shell -a 'killall -q rados_object_perf.py || echo -n' all 2>&1 | tee /tmp/cleanup
   sleep 1
 }
 
@@ -117,6 +114,12 @@ fi
 rados rm -p $poolnm threads_done
 rados rm -p $poolnm threads_ready
 
+# drop cache if this is a read test
+
+if [ $wltype = "read" ] ; then
+  ansible -i $inv -m shell -a 'sync ; echo 3 > /proc/sys/vm/drop_caches' osds > /tmp/a 2>&1
+fi
+
 # kill off any straggler processes on remote hosts
 
 cleanup
@@ -170,8 +173,8 @@ for padded_n in `seq -f "%03g" 1 $threads` ; do
 
   next_launch="$l"
   cmd[$unpadded_n]="$next_launch"
-  echo "$next_launch"
-  (echo "$next_launch" ; eval "$next_launch" ) > $logdir/rados-wl-thread-$padded_n.log &
+  #echo "$next_launch"
+  eval "$next_launch" > $logdir/rados-wl-thread-$padded_n.log &
   pids="$pids $!"  # save next thread PID
   # throttle launches so ssh doesn't lock up
   if [ $hx = 0 ] ; then sleep 1 ; fi
