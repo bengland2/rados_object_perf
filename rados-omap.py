@@ -114,7 +114,8 @@ if direction == 'write' or direction == 'writeread':
   while base_key < total_keys:
     with rados.WriteOpCtx() as op:
       for k in range(keys_per_call):
-        omap_key_name = '%s-%09d' % (key_prefix, k + base_key)
+        omap_key_name = '%s-%09d' % (key_prefix, (keys_per_call - k) + base_key)
+        if debug: print('omap key: %s' % omap_key_name)
         if value_size > 0:
           v = omap_key_name
           while len(v) < value_size: v = v + '.' + v
@@ -155,13 +156,20 @@ else:
   with rados.ReadOpCtx() as op:
     omaps, ret = ioctx.get_omap_vals(op, "", "", -1)
     ioctx.operate_read_op(op, obj_name)
-    keys = (k for k, __ in omaps)
     values = (v for __, v in omaps)
-    keycount = 0
-    for k in keys:
-       keycount += 1
+    valuecount = 0
     for v in values:
        valuecount += 1
+       if debug: print(v)
+    omaps, ret = ioctx.get_omap_vals(op, "", "", -1)
+    ioctx.operate_read_op(op, obj_name)
+    keys = (k for k, __ in omaps)
+    keycount = 0
+    for k in keys:
+       if debug: print(k)
+       keycount += 1
+
+    print keycount, valuecount
     assert(keycount == valuecount)
     if keycount < total_keys:
       usage('must first write an omap key list at least as long as %d keys' % total_keys)
