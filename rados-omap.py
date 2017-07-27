@@ -165,7 +165,10 @@ else:
     ioctx.operate_read_op(op, obj_name)
     keys = (k for k, __ in omaps)
     keycount = 0
+    last_key=''
     for k in keys:
+       if k < last_key:
+           print('key %s < last key %s' % (k, last_key))
        if debug: print(k)
        keycount += 1
 
