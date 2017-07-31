@@ -21,10 +21,10 @@ def parse_int(valstr, inttype):
   val = int(valstr)  # can throw exception ValueError
   if inttype == 'positive':
     if val <= 0:
-	raise ValueError('must be positive integer')
+        raise ValueError('must be positive integer')
   elif inttype == 'non-negative':
     if val < 0:
-	raise ValueError('must be non-negative integer')
+        raise ValueError('must be non-negative integer')
   return val
 
 keys_per_call = 1
@@ -41,9 +41,9 @@ k=1
 argc = len(sys.argv)
 while k < argc:
   if argc - k < 2:
-	usage('must supply both parameter name and parameter value')
+        usage('must supply both parameter name and parameter value')
   if not sys.argv[k].startswith('--'):
-	usage('parameter must begin with "--"')
+        usage('parameter must begin with "--"')
   prmname = sys.argv[k][2:]
   prmval = sys.argv[k+1]
   k += 2
@@ -120,6 +120,7 @@ if direction == 'write' or direction == 'writeread':
           v = omap_key_name
           while len(v) < value_size: v = v + '.' + v
           value = v[:value_size]
+        # syntax weirdometer alert
         ioctx.set_omap(op, (omap_key_name,), (value,))
       ioctx.operate_write_op(op, obj_name)
       if think_time > 0.0:
@@ -136,10 +137,10 @@ if direction == 'write' or direction == 'writeread':
         read_keycount = 0
         with rados.ReadOpCtx() as read_op:
           read_omap, ret = ioctx.get_omap_vals(read_op, "", "", -1)
+          assert(ret == 0)
           ioctx.operate_read_op(read_op, obj_name)
-          read_keys = (k for k, __ in read_omap)
           read_keycount = 0
-          for k in read_keys:
+          for (k, v) in read_omap:
             read_keycount += 1
             if debug: print(k)
           read_end_time = time.time()
@@ -154,26 +155,17 @@ else:
   time.sleep(5) # give multiple threads time to set up
   start_time = time.time()
   with rados.ReadOpCtx() as op:
-    omaps, ret = ioctx.get_omap_vals(op, "", "", -1)
+    iter, ret = ioctx.get_omap_vals(op, "", "", -1)
+    assert(ret == 0)
     ioctx.operate_read_op(op, obj_name)
-    values = (v for __, v in omaps)
-    valuecount = 0
-    for v in values:
-       valuecount += 1
-       if debug: print(v)
-    omaps, ret = ioctx.get_omap_vals(op, "", "", -1)
-    ioctx.operate_read_op(op, obj_name)
-    keys = (k for k, __ in omaps)
+    print(obj_name)
     keycount = 0
     last_key=''
-    for k in keys:
+    for (k,v) in list(iter):
+       keycount += 1
+       if debug: print('%s, %s' % (k, str(v)))
        if k < last_key:
            print('key %s < last key %s' % (k, last_key))
-       if debug: print(k)
-       keycount += 1
-
-    print keycount, valuecount
-    assert(keycount == valuecount)
     if keycount < total_keys:
       usage('must first write an omap key list at least as long as %d keys' % total_keys)
 
