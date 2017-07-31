@@ -21,7 +21,8 @@ poolnm=radosperftest
 wltype=cleanup
 threads=1
 objcount=256
-thinktime=0
+thinktime=0.1
+adjustthink=true
 
 # parse command line inputs
 
@@ -67,6 +68,9 @@ while [ -n "$1" ] ; do
       ;;
     --think-time)
       thinktime=$2
+      ;;
+    --adjust-think-time)
+      adjustthink=$2
       ;;
     *)
       usage "unrecognized parameter name: $1"
@@ -126,7 +130,7 @@ cleanup
 radoscmd="rados -c $conffile -p $poolnm "
 echo "make sure rados_object_perf.py on clients is same as we have here"
 for c in ${clients[*]} ; do 
-  rsync -ravu rados_object_perf.py $c:
+  rsync -rau rados_object_perf.py $c:
 done
 
 # create a RADOS object to maintain shared state
@@ -162,9 +166,10 @@ for padded_n in `seq -f "%03g" 1 $threads` ; do
   # determine rados_object_perf.py command to launch
 
   rsptimepath="/tmp/rados-wl-thread-${padded_n}.csv"
-  l="ssh $host ./rados_object_perf.py --output-format json --response-time-file $rsptimepath " 
-  l="$l --conf $conffile --pool $poolnm --object-size $objsize --object-count $objcount "
-  l="$l --request-type $wltype --thread-id $n --thread-total $threads "
+  l="ssh $host ./rados_object_perf.py --output-format json --response-time-file $rsptimepath" 
+  l="$l --conf $conffile --pool $poolnm --object-size $objsize --object-count $objcount"
+  l="$l --request-type $wltype --thread-id $n --thread-total $threads"
+  l="$l --adjust-think-time $adjustthink"
   if [ -n "$thinktime" ] ; then
     l="$l --think-time $thinktime"
   fi
