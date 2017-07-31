@@ -51,7 +51,8 @@ rqs_posted = 0 # increment every time an async request is posted
 measurement_over = False  # true after first thread finishes
 objs_done = 0
 
-# declare  command line parameters up front so they have scope 
+# declare  command line parameters up front with defaults 
+# so they have scope 
 
 ceph_conf_file = '/etc/ceph/ceph.conf'
 keyring = '/etc/ceph/ceph.client.%s.keyring'
@@ -66,11 +67,12 @@ objcount = 10
 optype = 'cleanup'
 thread_id = ''
 threads_total = 1
-think_time = 0
 think_time_sec = 0.0
+adjusting_think_time = False
 output_json = False
 rsptime_path = None
 transfer_unit = 'MB'
+threads_done_fraction = 0.1
 
 # make a string of the specified number of bytes to write to object
 
@@ -105,10 +107,9 @@ def count_threads_in_omap(omap_obj):
   with rados.ReadOpCtx() as op:
     omaps, ret = ioctx.get_omap_vals(op, "", "", -1)
     ioctx.operate_read_op(op, omap_obj)
-    keys = (k for k, __ in omaps)
     # can't use len(keys) because keys is a generator
     ct = 0
-    for k in keys:
+    for (k, _) in omaps:
       if debug: print('in omap for %s: %s' % (omap_obj, k))
       ct += 1
     return ct
@@ -182,7 +183,7 @@ def time_estimator(obj_cnt_in):
 def other_threads_done(ioctx):
     thrds_done = count_threads_in_omap(threads_done_obj)
     if debug: print ('threads done = %d' % thrds_done)
-    return (thrds_done > 0)
+    return (thrds_done > (threads_total * threads_done_fraction))
 
 
 # measuremeht is over for this thread when any other thread has finished
@@ -225,6 +226,24 @@ def next_objnm( thread_id, index ):
   return 'o%07d-%s' % (index, thread_id)
 
 
+# adjust think time based on total threads and last response time
+# inputs:
+#   rqnum - request number
+#   prev_rsp_times - fixed-length array of response times from previous requests
+#                    we treat it as a ring buffer
+#   rsp_time - floating point response time from this just-finished request
+
+def adjust_think_time(rqnum, prev_rsp_times, rsp_time):
+  sample_ct = len(prev_rsp_times)
+  avg = 0.0
+  avg = reduce(lambda x, y: x+y, prev_rsp_times)
+  prev_rsp_times[rqnum % sample_ct] = rsp_time
+  avg += rsp_time
+  avg /= (sample_ct + 1)  # convert from total to average
+  next_think_time = avg * threads_total / 3.0   # 
+  if debug: print('prev_rsp_times %s avg %f next_think_time %f' % (str(prev_rsp_times), avg, next_think_time))
+  return next_think_time
+
 # if user requested duration-based test, see if our time is up
 
 def duration_based_exit(start_time_in, duration_in):
@@ -266,6 +285,8 @@ def usage(msg):
   print('--output-format json (default is text)')
   print('--response-time-file path')
   print('--transfer-unit MB|MiB (default is MB)')
+  print('--adjust-think-time true|false (default false)')
+  print('--threads_done_percent percentage')
   sys.exit(1)
 
 
@@ -300,8 +321,7 @@ while arg_index < len(argv):
   elif pname == 'thread-total':
     threads_total = int(pval)
   elif pname == 'think-time':
-    think_time_msec = int(pval)
-    think_time_sec = float(think_time_msec) / 1000.0
+    think_time_sec = float(pval)
   elif pname == 'response-time-file':
     rsptime_path = pval
   elif pname == 'output-format':
@@ -312,6 +332,16 @@ while arg_index < len(argv):
       transfer_unit = pval
     else:
       usage('transfer unit must be either MB (millions of bytes) or MiB (power-of-2 megabytes)')
+  elif pname == 'adjust-think-time':
+    lc_pval = pval.lower()
+    if lc_pval != 'true' and lc_pval != 'false':
+      usage('adjust-think-time requires boolean value true or false')
+    elif lc_pval == 'true':
+      adjusting_think_time = True
+    else:
+      adjusting_think_time = False
+  elif pname == 'threads-done-percent':
+    threads_done_fraction = float(pval) / 100.0
   else: usage('--%s: invalid parameter name' % pname)
 
 # display input parameter values (including defaults)
@@ -328,6 +358,8 @@ if not output_json:
   print('thread_id = %s' % thread_id)
   print('total threads in test = %d' % threads_total)
   print('think time (sec) = %f' % think_time_sec)
+  print('adjust think time? %s' % adjusting_think_time)
+  print('threads-done percent: %f' % (threads_done_fraction * 100.0))
 else:
   json_obj = {}
   params = {}
@@ -342,14 +374,19 @@ else:
   params['thread_id'] = thread_id
   params['total_threads'] = threads_total
   params['think_time'] = think_time_sec
+  params['adjust_think_time'] = adjusting_think_time
+  params['threads_done_percent'] = threads_done_fraction * 100.0
   json_obj['params'] = params
 
+if threads_done_fraction <= 0.0 or threads_done_fraction >= 1.0:
+  usage('threads-done-percent must be a number in between 0 and 100')
 max_qdepth_seen = 0
 # check every 1% of time points
 check_every = time_estimator(objcount) / 100
 if debug: print('check_every %d time units' % check_every)
 
 response_times = []
+sampled_rsp_times = [ 0.1 for k in range (0, 3) ]
 
 # if you add this to ceph.conf file, 
 # then you don't need to specify keyring in Rados constructor
@@ -378,10 +415,12 @@ with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cl
       for j in range(0,objcount):
         objnm = next_objnm(thread_id, j)
         if debug & 1: print('creating %s' % objnm)
-        if think_time: time.sleep(think_time_sec)
+        if think_time_sec > 0.0: time.sleep(think_time_sec)
         call_start_time = time.time()
         ioctx.aio_write_full(objnm, bigbuf, oncomplete=on_wr_rq_done)
         next_elapsed_time = append_rsptime( response_times, call_start_time )
+        if adjusting_think_time:
+          think_time_sec = adjust_think_time(j, sampled_rsp_times, next_elapsed_time)
         await_q_drain()
         if not (measurement_over or duration_based_exit(start_time, duration)):
           objs_done += 1
@@ -393,10 +432,12 @@ with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cl
     elif optype == 'read':
       for j in range(0,objcount):
         objnm = next_objnm(thread_id, j)
-        if think_time: time.sleep(think_time_sec)
+        if think_time_sec > 0.0: time.sleep(think_time_sec)
         call_start_time = time.time()
         ioctx.aio_read(objnm, objsize, 0, oncomplete=on_rd_rq_done)
         next_elapsed_time = append_rsptime( response_times, call_start_time )
+        if adjusting_think_time:
+          think_time_sec = adjust_think_time(j, sampled_rsp_times, next_elapsed_time)
         await_q_drain()
         if not (measurement_over or duration_based_exit(start_time, duration)):
           objs_done += 1
@@ -422,7 +463,7 @@ with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cl
       if debug & 32: print('stats: ' + str(ioctx.get_stats()))
       objcount = 0
       for o in ioctx.list_objects():
-        if think_time: time.sleep(think_time_sec)
+        if think_time_sec: time.sleep(think_time_sec)
         if o.key == threads_ready_obj or o.key == threads_done_obj: continue
         if debug: print(o.key)
         objs_done += 1
@@ -432,6 +473,8 @@ with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cl
            v = ioctx.get_xattr(o.key, a)
            print '  %s =  %s' % (a, str(v))
         append_rsptime( response_times, call_start_time )
+        if adjusting_think_time:
+          think_time_sec = adjust_think_time(j, sampled_rsp_times, next_elapsed_time)
         if measurement_over or duration_based_exit(start_time, duration):
           elapsed_time = time.time() - start_time
         if objs_done > objcount:
@@ -464,10 +507,10 @@ with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cl
     # output results in requested format
 
     if not output_json:
-      print(('elapsed time = %f , ' + 
-             'objects requested = %d, ' + 
-             'objects done in measurement interval = %d') % \
-        (elapsed_time, objcount, objs_done))
+      print('elapsed time = %f' % elapsed_time)
+      print('objects done in measurement interval = %d' % objs_done)
+      if adjusting_think_time and (think_time_sec > 0.0):
+        print('last_think_time: %f' % think_time_sec)
       if elapsed_time < 0.001:
         usage('elapsed time %f is too short, no stats for you!' % elapsed_time)
       print 'throughput = %f obj/sec' % thru
@@ -478,6 +521,8 @@ with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cl
       results['elapsed'] = elapsed_time
       results['objs_done'] = objs_done
       results['transfer_rate'] = transfer_rate
+      if adjusting_think_time and (think_time_sec > 0.0):
+        results['last_think_time'] = think_time_sec
       json_obj['results'] = results
       print(json.dumps(json_obj, indent=4))
 
