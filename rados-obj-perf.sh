@@ -72,6 +72,9 @@ while [ -n "$1" ] ; do
     --omap-key-count)
       omapkeycount=$2
       ;;
+    --omap-kvpairs-per-call)
+      omapkvpairspercall=$2
+      ;;
     --think-time)
       thinktime=$2
       ;;
@@ -102,6 +105,9 @@ echo "object size (bytes): $objsize" ; \
 echo "threads: $threads" ; \
 echo "test duration maximum: $duration" ; \
 echo "think time: $thinktime" ; \
+echo "omap key-value pairs: $omapkeycount" ; \
+echo "omap value size: $omapvaluesize" ; \
+echo "key-value-pairs per call: $omapkvpairspercall" ; \
 echo "max objects per thread: $objcount" ) \
   | tee $logdir/summary.log
 
@@ -176,8 +182,14 @@ for padded_n in `seq -f "%03g" 1 $threads` ; do
 
   rsptimepath="/tmp/rados-wl-thread-${padded_n}.csv"
   l="ssh $host ./rados_object_perf.py --output-format json --response-time-file $rsptimepath" 
-  l="$l --conf $conffile --pool $poolnm --object-size $objsize --object-count $objcount"
+  l="$l --conf $conffile --pool $poolnm "
   l="$l --request-type $wltype --thread-id $n --thread-total $threads"
+  if [ -n "$objsize" ] ; then
+    l="$l --object-size $objsize "
+  fi
+  if [ -n "$objcount" ] ; then
+    l="$l --object-count $objcount"
+  fi
   if [ -n "$adjustthink" ] ; then
     l="$l --adjust-think-time $adjustthink"
   fi
@@ -186,6 +198,9 @@ for padded_n in `seq -f "%03g" 1 $threads` ; do
   fi
   if [ -n "$omapvaluesize" ] ; then
     l="$l --omap-value-size $omapvaluesize"
+  fi
+  if [ -n "$omapkvpairspercall" ] ; then
+    l="$l --omap-kvpairs-per-call $omapkvpairspercall"
   fi
   if [ -n "$thinktime" ] ; then
     l="$l --think-time $thinktime"
@@ -201,6 +216,7 @@ for padded_n in `seq -f "%03g" 1 $threads` ; do
   # throttle launches so ssh doesn't lock up
   if [ $hx = 0 ] ; then sleep 1 ; fi
 done 
+echo "all threads launched"
 
 # wait for them to finish, report if problem
 
