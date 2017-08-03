@@ -625,6 +625,8 @@ with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cl
       results['transfer_rate'] = transfer_rate
       if adjusting_think_time and (think_time_sec > 0.0):
         results['last_think_time'] = think_time_sec
+      if threads_total > 1:
+        results['done_checks'] = done_checks
       json_obj['results'] = results
       print(json.dumps(json_obj, indent=4))
 
