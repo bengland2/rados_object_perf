@@ -38,30 +38,45 @@ contents = os.listdir(directory)
 for f in contents:
   fn = os.path.join(directory,f)
   if f.endswith('.log') and f.startswith('rados'):
-    print fn
+    #print fn
     with open(fn, 'r') as jsonf:
       next_thread = json.load(jsonf)
       tid = next_thread['params']['thread_id']
       threads[tid] = next_thread
-      print(json.dumps(next_thread, indent=4))
+      #print(json.dumps(next_thread, indent=4))
+
+any_thread = threads.values()[0]
+op_type = any_thread['params']['rq_type']
+if op_type == 'write' or op_type == 'read' or op_type == 'cleanup' or op_type == 'list':
+  unit = 'object'
+else:
+  unit = 'key-value-pair'
 
 total_xfer_rate = 0.0
-total_objs_done = 0
+total_units_done = 0
 max_elapsed = 0.0
-total_objs_requested = 0
+total_units_requested = 0
 for t in threads.values():
-  total_xfer_rate += t['results']['transfer_rate']
-  total_objs_done += t['results']['objs_done']
+  params = t['params']
+  total_units_done += t['results']['units_done']
   max_elapsed = max(max_elapsed, t['results']['elapsed'])
-  total_objs_requested += t['params']['obj_count']
+  if unit == 'object':
+    total_units_requested += params['obj_count']
+  else:
+    total_units_requested += params['omap-key-count']
+  if op_type == 'write' or op_type == 'read':
+    total_xfer_rate += t['results']['transfer_rate']
 
 print('elapsed time: %f' % max_elapsed)
-print('total objects done: %d' % total_objs_done)
-print('total objects requested: %d' % total_objs_requested)
-print('objects/sec average: %f' % (total_objs_done / max_elapsed))
-pct_objs_done = 100.0 * total_objs_done / total_objs_requested
-print('total transfer rate: %f' % total_xfer_rate)
-print('%% objects done: %f' % pct_objs_done)
-if pct_objs_done < pct_done_threshold:
-  print('WARNING: fewer than %d%% requested objects were processed in measurement interval' % pct_done_threshold)
+print('total objects done: %d' % total_units_done)
+print('total objects requested: %d' % total_units_requested)
+print('average throughput: %f' % (total_units_done / max_elapsed))
+pct_units_done = 100.0 * total_units_done / total_units_requested
+if total_xfer_rate > 0.0:
+  print('total transfer rate: %f' % total_xfer_rate)
+print('%% %ss done: %f' % (unit, pct_units_done))
+print('log directory is %s' % directory)
+if pct_units_done < pct_done_threshold:
+  print('WARNING: fewer than %d%% requested %ss were processed in measurement interval' % (
+         pct_done_threshold, unit))
 
