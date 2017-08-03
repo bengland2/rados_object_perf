@@ -63,7 +63,7 @@ for t in threads.values():
   if unit == 'object':
     total_units_requested += params['obj_count']
   else:
-    total_units_requested += params['omap-key-count']
+    total_units_requested += params['omap_key_count']
   if op_type == 'write' or op_type == 'read':
     total_xfer_rate += t['results']['transfer_rate']
 
