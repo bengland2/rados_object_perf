@@ -37,7 +37,7 @@ usage() {
 
 cleanup() {
   echo "killing any leftover threads"
-  ansible -i $inv -m shell -a 'killall -q rados_object_perf.py || echo -n' all 2>&1 | tee /tmp/cleanup
+  ansible -i $inv -m shell -a 'killall -q rados_object_perf.py || echo -n' all > /tmp/killthreads 2>&1
   sleep 1
 }
 
@@ -65,6 +65,12 @@ while [ -n "$1" ] ; do
       ;;
     --obj-count)
       objcount=$2
+      ;;
+    --omap-value-size)
+      omapvaluesize=$2
+      ;;
+    --omap-key-count)
+      omapkeycount=$2
       ;;
     --think-time)
       thinktime=$2
@@ -109,14 +115,15 @@ fi
 
 # check that pool exists
 
-rados df -p $poolnm
+radoscmd="rados -c $conffile -p $poolnm "
+$radoscmd df
 if [ $? != $OK ] ; then
   echo "ERROR: could not check pool $poolnm status"
   echo "create the pool first, then run the test"
   exit $NOTOK
 fi
-rados rm -p $poolnm threads_done
-rados rm -p $poolnm threads_ready
+$radoscmd rm threads_done
+$radoscmd rm threads_ready
 
 # drop cache if this is a read test
 
@@ -127,19 +134,21 @@ fi
 # kill off any straggler processes on remote hosts
 
 cleanup
-radoscmd="rados -c $conffile -p $poolnm "
-echo "make sure rados_object_perf.py on clients is same as we have here"
+
+# make sure rados_object_perf.py on clients is same as we have here"
+
 for c in ${clients[*]} ; do 
   rsync -rau rados_object_perf.py $c:
 done
 
 # create a RADOS object to maintain shared state
-$radoscmd rm $perf_obj
-$radoscmd create $perf_obj
+$radoscmd rm threads_done > /tmp/quiet 2>&1
+$radoscmd rm threads_ready >> /tmp/quiet 2>&1
+#$radoscmd create $perf_obj
 # threads do not start workload until all threads are ready
-$radoscmd setxattr $perf_obj threads_ready 0
+#$radoscmd setxattr $perf_obj threads_ready 0
 # threads stop measuring once threads_done is non-zero
-$radoscmd setxattr $perf_obj threads_done 0
+#$radoscmd setxattr $perf_obj threads_done 0
 
 # compute think time
 #thinktime='0.0'
@@ -169,7 +178,15 @@ for padded_n in `seq -f "%03g" 1 $threads` ; do
   l="ssh $host ./rados_object_perf.py --output-format json --response-time-file $rsptimepath" 
   l="$l --conf $conffile --pool $poolnm --object-size $objsize --object-count $objcount"
   l="$l --request-type $wltype --thread-id $n --thread-total $threads"
-  l="$l --adjust-think-time $adjustthink"
+  if [ -n "$adjustthink" ] ; then
+    l="$l --adjust-think-time $adjustthink"
+  fi
+  if [ -n "$omapkeycount" ] ; then
+    l="$l --omap-key-count $omapkeycount"
+  fi
+  if [ -n "$omapvaluesize" ] ; then
+    l="$l --omap-value-size $omapvaluesize"
+  fi
   if [ -n "$thinktime" ] ; then
     l="$l --think-time $thinktime"
   fi
@@ -207,7 +224,7 @@ for padded_n in `seq -f "%03g" 1 $threads` ; do
   echo "--- $host thread $padded_n ---"
   rsptimepath="/tmp/rados-wl-thread-${padded_n}.csv"
   scp -q $host:$rsptimepath $logdir/
-  cat $logdir/rados-wl-thread-$padded_n.log
+  #cat $logdir/rados-wl-thread-$padded_n.log
   if [ $hx -ge $hostcount ] ; then hx=0 ; fi
 done
 
@@ -216,6 +233,5 @@ done
 ( echo ; echo "SUMMARY" ; echo "------" ; \
   ./analyze-roperf-logs.py --directory $logdir ) \
   | tee -a $logdir/summary.log
-$radoscmd rm $perf_obj
 
 cleanup
