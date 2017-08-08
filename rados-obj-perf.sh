@@ -23,6 +23,7 @@ threads=1
 objcount=256
 thinktime=0.1
 adjustthink=true
+dropcache=True
 
 # parse command line inputs
 
@@ -31,7 +32,7 @@ NOTOK=1
 
 usage() {
   echo "ERROR: $1"
-  echo "usage: ./rados-obj-perf.sh --obj-size bytes --obj-count objects --threads count --request-type create|read|cleanup --think-time millisec "
+  echo "usage: ./rados-obj-perf.sh --obj-size bytes --obj-count objects --threads count --request-type write|read|cleanup --think-time millisec "
   exit $NOTOK
 }
 
@@ -81,6 +82,14 @@ while [ -n "$1" ] ; do
     --adjust-think-time)
       adjustthink=$2
       ;;
+    --drop-cache)
+      u=`echo $2 | tr '[a-z]' '[A-Z]'`
+      if [ "$u" == '0' -o "$u" == 'NO' -o "$u" == "FALSE" ] ; then
+        dropcache=False
+      else
+        dropcache=True
+      fi
+      ;;
     *)
       usage "unrecognized parameter name: $1"
       ;;
@@ -92,7 +101,7 @@ done
 # set up log directory and record test parameters
 
 timestamp=`date +%Y-%m-%d-%H-%M`
-logdir="rados_logs/$timestamp"
+logdir="~/rados_logs/$timestamp"
 mkdir -pv $logdir
 rm -f rados_logs/latest
 ln -sv ./$timestamp rados_logs/latest
@@ -102,6 +111,7 @@ echo "ceph config file: $conffile" ; \
 echo "ceph pool name: $poolnm" ; \
 echo "workload type: $wltype" ; \
 echo "object size (bytes): $objsize" ; \
+echo "drop cache? $drop_cache" ; \
 echo "threads: $threads" ; \
 echo "test duration maximum: $duration" ; \
 echo "think time: $thinktime" ; \
@@ -133,7 +143,8 @@ $radoscmd rm threads_ready
 
 # drop cache if this is a read test
 
-if [ $wltype = "read" ] ; then
+if [ $dropcache = "True" ] ; then
+  echo dropping cache
   ansible -i $inv -m shell -a 'sync ; echo 3 > /proc/sys/vm/drop_caches' osds > /tmp/a 2>&1
 fi
 
