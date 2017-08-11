@@ -10,7 +10,6 @@
 conffile=/etc/ceph/ceph.conf
 client_list=clients.list
 osd_list=osds.list
-inv=~/to-installer/internal-ansible-hosts
 
 # should not have to edit below this line normally
 
@@ -38,7 +37,7 @@ usage() {
 
 cleanup() {
   echo "killing any leftover threads"
-  ansible -i $inv -m shell -a 'killall -q rados_object_perf.py || echo -n' all > /tmp/killthreads 2>&1
+  ansible -i clients.list -m shell -a 'killall -q rados_object_perf.py || echo -n' all > /tmp/killthreads 2>&1
   sleep 1
 }
 
@@ -101,7 +100,7 @@ done
 # set up log directory and record test parameters
 
 timestamp=`date +%Y-%m-%d-%H-%M`
-logdir="~/rados_logs/$timestamp"
+logdir="rados_logs/$timestamp"
 mkdir -pv $logdir
 rm -f rados_logs/latest
 ln -sv ./$timestamp rados_logs/latest
@@ -145,7 +144,7 @@ $radoscmd rm threads_ready
 
 if [ $dropcache = "True" ] ; then
   echo dropping cache
-  ansible -i $inv -m shell -a 'sync ; echo 3 > /proc/sys/vm/drop_caches' osds > /tmp/a 2>&1
+  ansible -i osds.list -m shell -a 'sync ; echo 3 > /proc/sys/vm/drop_caches' osds > /tmp/a 2>&1
 fi
 
 # kill off any straggler processes on remote hosts
@@ -231,6 +230,7 @@ echo "all threads launched"
 
 # wait for them to finish, report if problem
 
+worst_status=$OK
 n=0
 for p in $pids ; do 
   (( n = $n + 1 ))
@@ -238,6 +238,7 @@ for p in $pids ; do
   s=$?
   if [ $s != $OK ] ; then 
     echo "pid $p returns status $s from host ${targethost[${n}]} for cmd:  ${cmd[$n]}"
+    worst_status=$s
   fi
 done
 
@@ -258,7 +259,8 @@ done
 # record aggregate result
 
 ( echo ; echo "SUMMARY" ; echo "------" ; \
-  ./analyze-roperf-logs.py --directory $logdir ) \
+  ./analyze-roperf-logs.py --directory $logdir 2>&1) \
   | tee -a $logdir/summary.log
 
 cleanup
+exit $worst_status
