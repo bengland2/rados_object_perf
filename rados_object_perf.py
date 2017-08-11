@@ -15,6 +15,8 @@ debug=0
 dbgstr = os.getenv('DEBUG') 
 if dbgstr: debug = int(dbgstr)
 
+bytes_per_MB = 1000000
+bytes_per_MiB = 1024 * 1024
 qdrain_timeout = 40000  # in msec
 threads_ready_obj = 'threads_ready'
 threads_done_obj = 'threads_done'
@@ -335,8 +337,7 @@ while arg_index < len(argv):
       # establish defaults
       if not omap_key_count: omap_key_count = 16
       if not omap_value_size: omap_value_size = 32
-      if optype == 'omap-write':
-        if not omap_kvpairs_per_call: omap_kvpairs_per_call = 1 
+      if not omap_kvpairs_per_call: omap_kvpairs_per_call = 1 
     elif optype == 'write' or optype == 'read' or optype == 'list' or optype == 'cleanup':
       unit = 'object'
       if not objsize: objsize = 4194304
@@ -441,8 +442,18 @@ else:
 
 if threads_done_fraction <= 0.0 or threads_done_fraction >= 1.0:
   usage('threads-done-percent must be a number in between 0 and 100')
-if omap_kvpairs_per_call > 0 and optype != 'omap-write':
-  usage('only define omap-kvpairs-per-call for an omap-write test')
+if optype.startswith('omap'):
+  if objcount > 0:
+    usage('only define objcount for a non-omap test')
+  if objsize > 0:
+    usage('only define objsize for a non-omap test')
+else:
+  if omap_kvpairs_per_call > 0:
+    usage('only define omap-kvpairs-per-call for an omap test')
+  if omap_key_count:
+    usage('only define omap-key-count for an omap test')
+  if omap_value_size:
+    usage('only define omap-value-size for an omap test')
 max_qdepth_seen = 0
 if debug: print('check_every %d time units' % check_every)
 response_times = []
@@ -538,11 +549,11 @@ with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cl
 
     elif optype == 'omap-read':
       ioctx.read(per_thread_obj_name)
+      keycount = 0
       with rados.ReadOpCtx() as op:
-        keycount = 0
         last_key=''
         while True:
-          iter, ret = ioctx.get_omap_vals(op, last_key, "", -1)
+          iter, ret = ioctx.get_omap_vals(op, last_key, "", omap_kvpairs_per_call)
           assert(ret == 0)
           ioctx.operate_read_op(op, per_thread_obj_name)
           pairs_in_iter = 0
@@ -552,12 +563,17 @@ with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cl
             keycount += 1
             if debug: print('%s, %s' % (k, str(v)))
             if k < last_key:
-              print('key %s < last key %s' % (k, last_key))
+              print('ERROR: key %s < last key %s' % (k, last_key))
             last_key = k
             pairs_in_iter += 1
             check_measurement_over(call_start_time, omap_time_estimator)
+            if keycount >= omap_key_count:
+              break
             #if measurement_over: break
-          if (pairs_in_iter == 0):
+          if keycount >= omap_key_count:
+            break
+          assert(pairs_in_iter <= omap_kvpairs_per_call)
+          if (pairs_in_iter == 0): # if we reached end of all key-value pairs
             break
         if keycount < omap_key_count:
           usage('must first write an omap key list at least as long as %d keys' % omap_key_count)
@@ -598,9 +614,14 @@ with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cl
         units_done *= omap_kvpairs_per_call
       if optype == "write" or optype == "read":
         if transfer_unit == 'MB':
-          transfer_rate = thru * objsize / 1000.0 / 1000.0
+          transfer_rate = thru * objsize / bytes_per_MB
         else:
-          transfer_rate = thru * objsize / 1024.0 / 1024.0
+          transfer_rate = thru * objsize / bytes_per_MiB
+      elif optype == 'omap-write' or optype == 'omap-read':
+        if transfer_unit == 'MB':
+          transfer_rate = thru * omap_value_size / bytes_per_MB
+        else:
+          transfer_rate = thru * omap_value_size / bytes_per_MiB
 
     # output results in requested format
 
@@ -614,15 +635,19 @@ with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cl
       if elapsed_time < 0.001:
         usage('elapsed time %f is too short, no stats for you!' % elapsed_time)
       print('throughput = %f %ss/sec' % (thru, unit))
-      if optype == "write" or optype == "read":
-        print('transfer rate = %f MiB/s' % transfer_rate)
+      if transfer_rate > 0.0:
+        if transfer_unit == 'MB':
+          print('transfer rate = %f MB/s' % transfer_rate)
+        else:
+          print('transfer rate = %f MiB/s' % transfer_rate)
       if done_checks > 0:
         print('checks for test done = %d' % done_checks)
     else:
       results = {}
       results['elapsed'] = elapsed_time
       results['units_done'] = units_done
-      results['transfer_rate'] = transfer_rate
+      if transfer_rate > 0.0:
+        results['transfer_rate'] = transfer_rate
       if adjusting_think_time and (think_time_sec > 0.0):
         results['last_think_time'] = think_time_sec
       if threads_total > 1:
