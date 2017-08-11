@@ -40,10 +40,15 @@ for f in contents:
   if f.endswith('.log') and f.startswith('rados'):
     #print fn
     with open(fn, 'r') as jsonf:
-      next_thread = json.load(jsonf)
-      tid = next_thread['params']['thread_id']
-      threads[tid] = next_thread
+      try:
+        next_thread = json.load(jsonf)
+        tid = next_thread['params']['thread_id']
+        threads[tid] = next_thread
+      except ValueError:
+        print('unable to load from %s' % fn)
       #print(json.dumps(next_thread, indent=4))
+if len(threads) == 0:
+  usage('no thread results found')
 
 any_thread = threads.values()[0]
 op_type = any_thread['params']['rq_type']
