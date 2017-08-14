@@ -19,7 +19,6 @@ perf_obj=rados_object_perf
 poolnm=radosperftest
 wltype=cleanup
 threads=1
-objcount=256
 thinktime=0.1
 adjustthink=true
 dropcache=True
