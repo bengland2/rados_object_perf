@@ -379,7 +379,8 @@ while arg_index < len(argv):
   else: usage('--%s: invalid parameter name' % pname)
 
 if threads_total == 1:
-  print('disabling think time for single-thread test')
+  if debug & 4:
+    print('disabling think time for single-thread test')
   adjusting_think_time = False
   think_time_sec = 0.0
 
