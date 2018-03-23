@@ -326,8 +326,12 @@ sys.stdout.flush()
 
 # find out what OSDs are in each host
 
-with open(host_list_fn, 'r') as f:
-    host_list = [ h.strip() for h in f.readlines() ]
+try:
+    with open(host_list_fn, 'r') as f:
+        host_list = [ h.strip() for h in f.readlines() ]
+except IOError:
+    usage('could not read ' + host_list_fn)
+
 
 print('')
 print('OSDs discovered on hosts:')
