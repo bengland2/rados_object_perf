@@ -2,6 +2,11 @@
 
 # script to monitor Ceph OSDs via ceph daemon commands
 # and convert counters to meaningful statistics
+# to collect a JSON output file from a run, just
+# redirect stdout.  For example:
+#   ./ceph-osd-stats.py \
+#      --samples 3 --poll-interval 10 --host-list-fn hosts.list \
+#      > /tmp/osd-stats.json
 
 import os, sys, subprocess, json, time
 from subprocess import CalledProcessError
@@ -18,6 +23,7 @@ pct_format = '%3.3f'
 undefined_pct = -10.123
 param_set = 'perf dump'
 bytes_per_GB = 1000000000.0
+debug = 0
 
 bluefs_rate_fields = [ 
     'bluefs',            # list element 0 is the outer key in ceph daemon JSON
@@ -154,6 +160,11 @@ def usage(msg):
     print('usage: ceph-osd-stats.py\n  [ --samples positive-int ]\n  [ --host-list-fn pathname ]\n  [ --poll-interval positive-int ]')
     sys.exit(1)
 
+space_record = '                                                        '
+
+def indent(spaces, json_str):
+    lines = [ space_record[:spaces] + l for l in json_str.split('\n') ]
+    return '\n'.join(lines)
 
 def grab_json_from_osd( target_host, osd_num, param_set_name ):
     cmd = 'ssh %s ceph daemon osd.%d %s' % (
@@ -295,6 +306,8 @@ def calc_usage_from_sample( sample ):
 # parse command line parameters
 # and display parameter values
 
+debug = os.getenv("DEBUG")
+
 argindex = 1
 argct = len(sys.argv)
 
@@ -315,13 +328,15 @@ while argindex < argct:
         host_list_fn = pval
     else:
         usage('unrecognized parameter name: --%s' % pname)
-print('samples = %d' % samples)
-print('host list = %s' % host_list_fn)
-print('parameter set = ceph daemon osd.NNN %s' % param_set)
-print('rates averaged across poll interval = %f' % poll_interval)
-#print('non-zero rates and usage stats being collected on these counters:')
-#for field_list in [ bluefs_rate_fields,  bluestore_rate_fields, osd_rate_fields ]:
-#    print('\n%s : %s' % (field_list[0], field_list[1:]))
+
+params = {}
+params['samples'] = samples
+params['host-list-fn'] = host_list_fn
+params['poll-interval'] = poll_interval
+print('{')
+print('    "recording-parameters": ')
+print(indent(8, json.dumps(params, indent=2)))
+print('    ,"statistics": [ ')
 sys.stdout.flush()
 
 # find out what OSDs are in each host
@@ -333,12 +348,15 @@ except IOError:
     usage('could not read ' + host_list_fn)
 
 
-print('')
-print('OSDs discovered on hosts:')
+if debug:
+    sys.stderr.write('\n')
+    sys.stderr.write('OSDs discovered on hosts:\n')
 osds_in_host = {}
 for h in host_list:
     osds_in_host[h] = find_osds_in_host(h)
-    print('osds in host %s: %s' % (h, ','.join([ str(osdnum) for osdnum in osds_in_host[h] ])))
+    if debug:
+        sys.stderr.write('osds in host %s: %s\n' % (h, ','.join([ str(osdnum) for osdnum in osds_in_host[h] ])))
+sys.stderr.flush()
 sys.stdout.flush()
 
 # start polling counters
@@ -365,7 +383,7 @@ for s in range(0, samples):
                 c_prev = sample_list[s-1][o]
                 c_now = sample_list[s][o]
             except KeyError:
-                print('sample %d for OSD %d not seen' % (s, o))
+                sys.stderr.write('sample %d for OSD %d not seen\n' % (s, o))
                 continue
             stat_set = calc_rates_from_samples(c_prev, c_now)
             usage_stat_set = calc_usage_from_sample(c_now)
@@ -378,16 +396,32 @@ for s in range(0, samples):
     sample_end_time = time.time()
     sample_elapsed_time = sample_end_time - sample_start_time
     if sample_elapsed_time > poll_interval:
-        print('WARNING: took %f sec to poll all OSDs but poll interval is %f' % 
-            (sample_elapsed_time, poll_interval))
+        sys.stderr.write('WARNING: took %f sec to poll all OSDs\n' % 
+                          sample_elapsed_time)
     else:
         sleep_time = poll_interval - sample_elapsed_time
-        #print('sleeping for %6.1f sec' % sleep_time)
+        if debug: 
+            sys.stderr.write('sleeping for %6.1f sec\n' % sleep_time)
+            sys.stderr.flush()
         time.sleep(sleep_time)
 
     # print out this polling interval's stats
 
+    sys.stderr.flush()
     if s > 0:
-        print('%11.1f sec after start' % ((time.time() - start_time) - poll_interval))
-        print(json.dumps(all_stats, indent=4, sort_keys=True))
+	if s > 1:
+	    print('       ,{')
+	else:
+	    print('       {')
+	print('            "sample": %d,' % s)
+        print('            "time-after-start": %8.1f,' %
+                              ((time.time() - start_time) - poll_interval))
+	print('            "osds": ')
+        print(indent(12, json.dumps(all_stats, indent=4, sort_keys=True)))
+	print('       }')
         sys.stdout.flush()
+# close off statistics
+print('    ]')
+# close off data collection
+print('}')
+
