@@ -336,7 +336,7 @@ params['poll-interval'] = poll_interval
 print('{')
 print('    "recording-parameters": ')
 print(indent(8, json.dumps(params, indent=2)))
-print('    ,"statistics": [ ')
+print('    ,"statistics": { ')
 sys.stdout.flush()
 
 # find out what OSDs are in each host
@@ -409,19 +409,18 @@ for s in range(0, samples):
 
     sys.stderr.flush()
     if s > 0:
-	if s > 1:
-	    print('       ,{')
-	else:
-	    print('       {')
-	print('            "sample": %d,' % s)
-        print('            "time-after-start": %8.1f,' %
-                              ((time.time() - start_time) - poll_interval))
-	print('            "osds": ')
+        if s > 1:
+            print('       ,"%d": {' % s)
+        else:
+            print('       "%d": {' % s)
+        print('            "osds": ')
+        all_stats['time-after-start'] = \
+                              (time.time() - start_time) - poll_interval
         print(indent(12, json.dumps(all_stats, indent=4, sort_keys=True)))
-	print('       }')
+        print('       }')
         sys.stdout.flush()
 # close off statistics
-print('    ]')
+print('    }')
 # close off data collection
 print('}')
 
