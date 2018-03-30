@@ -11,11 +11,26 @@
 import os, sys, subprocess, json, time
 from subprocess import CalledProcessError
 
+def usage(msg):
+    print('ERROR: ' + msg)
+    print('usage: ceph-osd-stats.py')
+    print('  [ --samples positive-int ]')
+    print('  [ --host-list-fn pathname ]')
+    print('  [ --poll-interval positive-int ]')
+    print('  [ --es-document T[rue]|F[alse] ]')
+    sys.exit(1)
+
 # default values for input parameters
 
 host_list_fn = 'hosts.list'
 samples = 2
 poll_interval = 5.0
+es_document = False
+es_host = '10.18.81.12'
+es_port = '9200'
+es_index = 'ben-try5'
+es_doctype = 'ceph-osd-stats-v1'
+collection = time.strftime('%Y-%m-%d-%H-%M')
 
 # miscellaneous constants
 
@@ -24,6 +39,7 @@ undefined_pct = -10.123
 param_set = 'perf dump'
 bytes_per_GB = 1000000000.0
 debug = 0
+post_file = '/tmp/post.json'
 
 bluefs_rate_fields = [ 
     'bluefs',            # list element 0 is the outer key in ceph daemon JSON
@@ -155,11 +171,6 @@ osd_rate_fields = [
 class CephCountException(Exception):
     pass
 
-def usage(msg):
-    print('ERROR: ' + msg)
-    print('usage: ceph-osd-stats.py\n  [ --samples positive-int ]\n  [ --host-list-fn pathname ]\n  [ --poll-interval positive-int ]')
-    sys.exit(1)
-
 space_record = '                                                        '
 
 def indent(spaces, json_str):
@@ -192,6 +203,17 @@ def find_osds_in_host( target_host ):
         pass
     return osdnums
 
+doc_counter = 0
+
+def post_document_to_es( doc_index, doc_type, doc_id ):
+    global doc_counter
+    cmd_list = ["-s", "-X PUT", "-H Content-Type:application/json", 
+                'http://%s:%s/%s/%s/%s?pretty' % (es_host, es_port, doc_index, doc_type, '%s_%d' % (doc_id, doc_counter)),  
+                '-d', '@%s'  % post_file]
+    cmd_args = ' '.join(cmd_list)
+    sys.stderr.write('curl ' + cmd_args + '\n')
+    rc = os.system('curl ' + cmd_args)
+    doc_counter += 1
 
 # calculate percentage as a floating point number
 # from 2 integers returned by "ceph daemon" command
@@ -326,6 +348,9 @@ while argindex < argct:
         poll_interval = float(pval)
     elif pname == 'host-list-fn':
         host_list_fn = pval
+    elif pname == 'es-document':
+        if pval.lower().startswith('t'):
+            es_document = True
     else:
         usage('unrecognized parameter name: --%s' % pname)
 
@@ -333,11 +358,12 @@ params = {}
 params['samples'] = samples
 params['host-list-fn'] = host_list_fn
 params['poll-interval'] = poll_interval
-print('{')
-print('    "recording-parameters": ')
-print(indent(8, json.dumps(params, indent=2)))
-print('    ,"statistics": { ')
-sys.stdout.flush()
+if not es_document:
+    print('{')
+    print('    "recording-parameters": ')
+    print(indent(8, json.dumps(params, indent=2)))
+    print('    ,"statistics": { ')
+    sys.stdout.flush()
 
 # find out what OSDs are in each host
 
@@ -408,17 +434,29 @@ for s in range(0, samples):
     # print out this polling interval's stats
 
     sys.stderr.flush()
+    stat_time = (time.time() - start_time) - poll_interval
     if s > 0:
-        if s > 1:
-            print('       ,"%d": {' % s)
+        if not es_document:
+            if s > 1:
+                print('       ,"%d": {' % s)
+            else:
+                print('       "%d": {' % s)
+            print('            "osds": ')
+            all_stats['time-after-start'] = stat_time
+            print(indent(12, json.dumps(all_stats, indent=4, sort_keys=True)))
+            print('       }')
+            sys.stdout.flush()
         else:
-            print('       "%d": {' % s)
-        print('            "osds": ')
-        all_stats['time-after-start'] = \
-                              (time.time() - start_time) - poll_interval
-        print(indent(12, json.dumps(all_stats, indent=4, sort_keys=True)))
-        print('       }')
-        sys.stdout.flush()
+            for o in all_stats.keys():
+                for p in params.keys(): 
+                    osd_stats = all_stats[o]
+                    osd_stats[p] = params[p]
+                    osd_stats['@time-after-start'] = stat_time
+                    osd_stats['osdnum'] = o
+                    osd_stats['sample'] = s
+                    with open(post_file, 'w') as postf:
+                        json.dump(osd_stats, postf)
+                    post_document_to_es( es_index, es_doctype, collection )
 # close off statistics
 print('    }')
 # close off data collection
