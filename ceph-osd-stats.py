@@ -454,9 +454,9 @@ for s in range(0, samples):
                     osd_stats['@time-after-start'] = stat_time
                     osd_stats['osdnum'] = o
                     osd_stats['sample'] = s
-                    with open(post_file, 'w') as postf:
-                        json.dump(osd_stats, postf)
-                    post_document_to_es( es_index, es_doctype, collection )
+                with open(post_file, 'w') as postf:
+                    json.dump(osd_stats, postf)
+                post_document_to_es( es_index, es_doctype, collection )
 # close off statistics
 print('    }')
 # close off data collection
