@@ -11,6 +11,11 @@ from itertools import permutations
 from math import factorial as f
 from sys import argv, exit
 
+# since mon osd backfillfull ratio default is 90%
+osd_full_limit_pct = 10.0
+# allow for OSDs being perfectly even in space utilization
+osd_space_variation = 5.0
+
 def usage(msg):
     print('ERROR: %s' % msg)
     print('usage: backfill.py node-count replica-count')
@@ -54,5 +59,7 @@ lost_pct = 100.0 * lost / all_len
 print('backfilling required for %6.2f percent of data' % lost_pct)
 
 free_space_needed = lost_pct / (node_count - 1)
-print('free space needed on remaining OSDs = %6.2f' % free_space_needed)
+print('free space needed on remaining OSDs = %6.2f' % 
+       (free_space_needed + osd_full_limit_pct + osd_space_variation))
+
 
