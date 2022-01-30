@@ -181,7 +181,7 @@ def objlist_time_estimator(obj_cnt_in):
 def other_threads_done():
     thrds_done = count_threads_in_omap(threads_done_obj)
     if debug:
-        print ('threads done = %d' % thrds_done)
+        print('threads done = %d' % thrds_done)
     return (thrds_done > (threads_total * threads_done_fraction))
 
 
@@ -255,7 +255,9 @@ def adjust_think_time(rqnum, prev_rsp_times, rsp_time):
   avg += rsp_time
   avg /= (sample_ct + 1)  # convert from total to average
   next_think_time = avg * threads_total / 3.0   # 
-  if debug: print('prev_rsp_times %s avg %f next_think_time %f' % (str(prev_rsp_times), avg, next_think_time))
+  if debug:
+      print('prev_rsp_times %s avg %f next_think_time %f' % 
+            (str(prev_rsp_times), avg, next_think_time))
   return next_think_time
 
 # if user requested duration-based test, see if our time is up
