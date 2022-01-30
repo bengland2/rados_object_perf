@@ -8,13 +8,12 @@
 #
 
 conffile=/etc/ceph/ceph.conf
-client_list=clients.list
+client_list=rados_perf_clients.list
 osd_list=osds.list
 
 # should not have to edit below this line normally
 
 clients=(`cat $client_list`)
-servers=(`cat $osd_list`)
 perf_obj=rados_object_perf
 poolnm=radosperftest
 wltype=cleanup
@@ -30,13 +29,15 @@ NOTOK=1
 
 usage() {
   echo "ERROR: $1"
-  echo "usage: ./rados-obj-perf.sh --obj-size bytes --obj-count objects --threads count --request-type write|read|cleanup --think-time millisec "
+  echo "usage: ./rados-obj-perf.sh --obj-size bytes --obj-count objects --threads count --request-type write|read|cleanup --think-time millisec --drop-cache boolean"
   exit $NOTOK
 }
 
 cleanup() {
   echo "killing any leftover threads"
-  ansible -i clients.list -m shell -a 'killall -q rados_object_perf.py || echo -n' all > /tmp/killthreads 2>&1
+  ansible all -i $client_list -m shell -a \
+	    'killall -q rados_object_perf.py || echo -n' \
+	  > $logdir/rados-obj-perf.killthreads 2>&1
   sleep 1
 }
 
@@ -96,6 +97,11 @@ while [ -n "$1" ] ; do
   shift
 done
 
+if [ "`echo $wltype | tr '[a-z] [A-Z]'`" != "READ" ] ; then
+  echo 'do not drop cache unless running a read test'
+  dropcache=False
+fi
+
 # set up log directory and record test parameters
 
 timestamp=`date +%Y-%m-%d-%H-%M`
@@ -126,6 +132,7 @@ if [ $hostcount == 0 ] ; then
   echo "no RADOS client list found"
   exit $NOTOK
 fi
+cat $server_list $client_list | sort -u > $logdir/all.list
 
 # check that pool exists
 
@@ -143,7 +150,9 @@ $radoscmd rm threads_ready
 
 if [ $dropcache = "True" ] ; then
   echo dropping cache
-  ansible -i osds.list -m shell -a 'sync ; echo 3 > /proc/sys/vm/drop_caches' osds > /tmp/a 2>&1
+    ansible all -i $logdir/all.list -m shell -a \
+	    'sync ; echo 3 > /proc/sys/vm/drop_caches' \
+	  >> $logdir/rados-obj-perf.cachedrop.log 2>&1 || exit $NOTOK
 fi
 
 # kill off any straggler processes on remote hosts
@@ -152,9 +161,9 @@ cleanup
 
 # make sure rados_object_perf.py on clients is same as we have here"
 
-for c in ${clients[*]} ; do 
-  rsync -rau rados_object_perf.py $c:
-done
+ansible all -i $logdir/all.list -m copy -a \
+	  'src=rados_object_perf.py dest=./' \
+	> $logdir/rados-obj-perf.copy.log 2>&1 || exit $NOTOK
 
 # create a RADOS object to maintain shared state
 $radoscmd rm threads_done > /tmp/quiet 2>&1
