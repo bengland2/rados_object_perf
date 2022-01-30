@@ -83,7 +83,6 @@ def build_data_buf(sz):
 def on_rd_rq_done(completion,data_read):
   global rqs_done
   data_len = len(data_read)
-  #print('complete read %d bytes' % data_len)
   assert(data_len == objsize)
   rqs_done += 1
 
@@ -124,10 +123,10 @@ def await_starting_gun():
 
   # if multiple threads write to the object, this is harmless
   # just ensuring that object exists before we update its omap
-  # ensure object exists before writing to omap
 
-  ioctx.write_full(threads_ready_obj, bytes(thread_id, 'utf-8')) 
-  ioctx.write_full(threads_done_obj, bytes(thread_id, 'utf-8'))  
+  thrd_id_bytes = bytes('%8s\n' % thread_id, 'utf-8')
+  ioctx.write_full(threads_ready_obj, thrd_id_bytes) # ensure object exists before writing to omap
+  ioctx.write_full(threads_done_obj,  thrd_id_bytes)  # ensure this object exists too
 
   # tell other threads that this thread has arrived at the starting gate
 
@@ -181,7 +180,8 @@ def objlist_time_estimator(obj_cnt_in):
 
 def other_threads_done():
     thrds_done = count_threads_in_omap(threads_done_obj)
-    if debug: print ('threads done = %d' % thrds_done)
+    if debug:
+        print ('threads done = %d' % thrds_done)
     return (thrds_done > (threads_total * threads_done_fraction))
 
 
@@ -230,7 +230,7 @@ def await_q_drain():
     time.sleep(0.001)
     #timeout -= 1.0
     #if timeout < 0.0:
-    #  print 'ERROR: queue never drained in %f sec!' % (qdrain_timeout/1000)
+    #  print('ERROR: queue never drained in %f sec!' % (qdrain_timeout/1000))
     #  sys.exit(1)
 
 
@@ -433,13 +433,13 @@ else:
     params['obj_count'] = objcount
     check_every = object_time_estimator(objcount) / 100
   params['rq_type'] = optype
-  if threads_total > 1:
-    params['thread_id'] = thread_id
-    params['total_threads'] = threads_total
-    params['threads_done_percent'] = threads_done_fraction * 100.0
-    params['think_time'] = think_time_sec
-    params['adjust_think_time'] = adjusting_think_time
+  params['thread_id'] = thread_id
+  params['total_threads'] = threads_total
+  params['threads_done_percent'] = threads_done_fraction * 100.0
+  params['think_time'] = think_time_sec
+  params['adjust_think_time'] = adjusting_think_time
   params['transfer-unit'] = transfer_unit
+  params['hostname'] = hostname
   json_obj['params'] = params
 
 if threads_done_fraction <= 0.0 or threads_done_fraction >= 1.0:
@@ -449,8 +449,8 @@ if optype.startswith('omap'):
     usage('only define objcount for a non-omap test')
   if objsize > 0:
     usage('only define objsize for a non-omap test')
-else:
-  if omap_kvpairs_per_call is not None and omap_kvpairs_per_call > 0:
+elif omap_kvpairs_per_call is not None:
+  if omap_kvpairs_per_call > 0:
     usage('only define omap-kvpairs-per-call for an omap test')
   if omap_key_count:
     usage('only define omap-key-count for an omap test')
@@ -468,7 +468,7 @@ per_thread_obj_name = '%s-%s' % (omap_obj_name, thread_id)
 # alternatively don't use cephx
 
 with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cluster:
-    #print cluster.get_fsid()
+    #print(cluster.get_fsid())
     pools = cluster.list_pools()
     if not pools.__contains__(mypool):
       cluster.create_pool(mypool) # FIXME: race condition if multiple threads
