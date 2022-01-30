@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 #
 # rados_object_perf.py - program to test performance of librados python binding
 # to get online help:
@@ -10,6 +10,7 @@
 
 import rados, sys, time, socket, os, json
 from rados import Ioctx
+from functools import reduce
 
 debug=0
 dbgstr = os.getenv('DEBUG') 
@@ -73,7 +74,7 @@ def build_data_buf(sz):
   starting_buf = '0123456789abcdef'
   while len(starting_buf) < sz:
     starting_buf += starting_buf
-  return starting_buf[0:sz]
+  return bytes(starting_buf[0:sz], 'utf-8')
 
 
 # for reads, we check that data read was of expected length and increment rqs done
@@ -82,7 +83,7 @@ def build_data_buf(sz):
 def on_rd_rq_done(completion,data_read):
   global rqs_done
   data_len = len(data_read)
-  #print 'complete read %d bytes' % data_len
+  #print('complete read %d bytes' % data_len)
   assert(data_len == objsize)
   rqs_done += 1
 
@@ -123,9 +124,10 @@ def await_starting_gun():
 
   # if multiple threads write to the object, this is harmless
   # just ensuring that object exists before we update its omap
+  # ensure object exists before writing to omap
 
-  ioctx.write_full(threads_ready_obj, '%8s\n' % thread_id) # ensure object exists before writing to omap
-  ioctx.write_full(threads_done_obj, '%8s\n' % thread_id)  # ensure this object exists too
+  ioctx.write_full(threads_ready_obj, bytes(thread_id, 'utf-8')) 
+  ioctx.write_full(threads_done_obj, bytes(thread_id, 'utf-8'))  
 
   # tell other threads that this thread has arrived at the starting gate
 
@@ -146,7 +148,6 @@ def await_starting_gun():
       break
     if debug: print('waiting %f sec until next thread count check' % sleep_delay)
     time.sleep(sleep_delay)
-    if debug: print
   if poll_count >= poll_timeout:
      raise Exception('threads did not become ready within %d polls with interval %f' % (poll_timeout, sleep_delay))
   if debug: print('thread %s saw starting gun fired' % thread_id)
@@ -449,7 +450,7 @@ if optype.startswith('omap'):
   if objsize > 0:
     usage('only define objsize for a non-omap test')
 else:
-  if omap_kvpairs_per_call > 0:
+  if omap_kvpairs_per_call is not None and omap_kvpairs_per_call > 0:
     usage('only define omap-kvpairs-per-call for an omap test')
   if omap_key_count:
     usage('only define omap-key-count for an omap test')
@@ -469,9 +470,9 @@ per_thread_obj_name = '%s-%s' % (omap_obj_name, thread_id)
 with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cluster:
     #print cluster.get_fsid()
     pools = cluster.list_pools()
-    if not pools.__contains__(unicode(mypool, 'utf-8')):
+    if not pools.__contains__(mypool):
       cluster.create_pool(mypool) # FIXME: race condition if multiple threads
-      print 'created pool ' + mypool
+      print('created pool ' + mypool)
     ioctx = cluster.open_ioctx(mypool)
 
     # wait until all threads are ready to run
@@ -517,7 +518,7 @@ with rados.Rados(conffile=ceph_conf_file, conf=dict(keyring=keyring_path)) as cl
         for a in ioctx.get_xattrs(o.key):
            if debug: print(a)
            v = ioctx.get_xattr(o.key, a)
-           print '  %s =  %s' % (a, str(v))
+           print('  %s =  %s' % (a, str(v)))
         if units_done > objcount:
           break
         check_measurement_over(call_start_time, objlist_time_estimator)

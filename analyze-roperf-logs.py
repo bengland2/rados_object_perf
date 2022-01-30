@@ -1,8 +1,8 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 # analyze-roperf-logs.py - reduce per-thread data to aggregate stats
 
-import os, sys, json
+import os,sys,json
 from sys import argv
 
 def usage(msg):
@@ -50,7 +50,8 @@ for f in contents:
 if len(threads) == 0:
   usage('no thread results found')
 
-any_thread = threads.values()[0]
+any_thread_id = [*threads.keys()][0]
+any_thread = threads[any_thread_id]
 op_type = any_thread['params']['rq_type']
 if op_type == 'write' or op_type == 'read' or op_type == 'cleanup' or op_type == 'list':
   unit = 'object'
